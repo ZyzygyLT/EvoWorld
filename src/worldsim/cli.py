@@ -63,6 +63,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         lines = [f"[month {e.month}] {e.text}" for e in engine.chronicle.events]
         out.write_text("\n".join(lines), encoding="utf-8")
         print(f"Chronicle -> {out} ({len(engine.chronicle.events)} events)")
+
+    if args.export:
+        from worldsim.export.state import engine_to_json
+
+        p = engine_to_json(engine, args.export)
+        print(f"State   -> {p}")
     return 0
 
 
@@ -85,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--height", type=int, default=80)
     r.add_argument("--ticks", type=int, default=240)
     r.add_argument("--chronicle", default=None, help="Write chronicle log to file")
+    r.add_argument("--export", default=None, help="Write full state JSON to file")
     r.set_defaults(func=cmd_run)
 
     args = p.parse_args(argv)

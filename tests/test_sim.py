@@ -14,6 +14,7 @@ def test_initial_setup(engine):
         assert len(k.sites) == 1
         assert k.sites[0].is_capital
         assert k.sites[0].population == 20
+        assert k.leader is not None  # crowned at founding
 
 
 def test_mutable_state_not_shared(engine):

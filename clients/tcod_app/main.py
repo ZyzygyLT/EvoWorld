@@ -56,6 +56,8 @@ MODES = [
     "drainage",
     "prosperity",
     "rivers",
+    "battles",
+    "beasts",
 ]
 
 
@@ -109,7 +111,50 @@ def draw_map(console: tcod.console.Console, engine: SimEngine, mode: str) -> Non
                 console.rgb[s.y, s.x]["fg"] = (255, 255, 255)
                 console.rgb[s.y, s.x]["bg"] = k.color
 
-    else:  # gradient modes
+    elif mode == "battles":
+        # heatmap of battle deaths over history (war + beast rampages)
+        heat = engine.battle_heat()
+        ch = np.full((world_h, world_w), 250, dtype=np.int32)
+        fg = np.zeros((world_h, world_w, 3), dtype=np.uint8)
+        bg = np.zeros((world_h, world_w, 3), dtype=np.uint8)
+        for b, color in COLORS.items():
+            mask = w.biome == int(b)
+            bg[mask] = tuple(c // 6 for c in color)  # type: ignore[index]
+        if heat.max() > 0:
+            norm = heat / heat.max()
+            hot = np.stack(
+                [norm * 255, (1 - norm) * 90, (1 - norm) * 40], axis=-1
+            ).astype(np.uint8)
+            hotmask = heat > 0
+            bg[hotmask] = hot[hotmask]
+            ch[heat > heat.max() * 0.5] = 42  # '*' where the worst fighting was
+        sub = console.rgb[:world_h, :world_w]
+        sub["ch"] = ch
+        sub["fg"] = fg
+        sub["bg"] = bg
+
+    elif mode == "beasts":
+        # biome dimmed + monsters as 'B' (alive) / 'b' (slain)
+        ch = np.full((world_h, world_w), 250, dtype=np.int32)
+        fg = np.zeros((world_h, world_w, 3), dtype=np.uint8)
+        bg = np.zeros((world_h, world_w, 3), dtype=np.uint8)
+        for b, color in COLORS.items():
+            mask = w.biome == int(b)
+            bg[mask] = tuple(c // 3 for c in color)  # type: ignore[index]
+        sub = console.rgb[:world_h, :world_w]
+        sub["ch"] = ch
+        sub["fg"] = fg
+        sub["bg"] = bg
+        for beast in engine.beasts:
+            if 0 <= beast.x < world_w and 0 <= beast.y < world_h:
+                alive = beast.hp > 0
+                console.rgb[beast.y, beast.x]["ch"] = ord("B" if alive else "b")
+                console.rgb[beast.y, beast.x]["fg"] = (
+                    (255, 120, 0) if alive else (120, 120, 120)
+                )
+                console.rgb[beast.y, beast.x]["bg"] = (0, 0, 0)
+
+    else:  # gradient modes: height/temperature/precipitation/drainage/prosperity
         if mode == "height":
             layer = w.height
             hot, cold = (255, 255, 255), (20, 20, 40)
@@ -140,6 +185,18 @@ def draw_map(console: tcod.console.Console, engine: SimEngine, mode: str) -> Non
             sub[w.rivers]["fg"] = (120, 180, 255)
 
 
+def _sparkline(values: list[int], width: int = 24) -> str:
+    """Compact sparkline of a population series (ASCII-safe for any console)."""
+    if not values:
+        return ""
+    blocks = " .:-=+*#"  # ASCII ramp: low -> high
+    lo, hi = min(values), max(values)
+    rng_v = max(1, hi - lo)
+    step = max(1, len(values) // width)
+    sampled = values[::step][-width:]
+    return "".join(blocks[min(7, (v - lo) * 8 // rng_v)] for v in sampled)
+
+
 def draw_sidebar(console: tcod.console.Console, engine: SimEngine) -> None:
     x0 = MAP_W + 1
     console.draw_frame(x0 - 1, 0, SIDEBAR_W, H)
@@ -148,12 +205,29 @@ def draw_sidebar(console: tcod.console.Console, engine: SimEngine) -> None:
     console.print(x0, y, f"Year {engine.month // 12}  Month {engine.month}")
     y += 1
     for k in engine.kingdoms:
-        if y >= H - 1:
+        if y >= H - 8:
             break
         color = tuple(k.color)
         mark = "!" if k.at_war else " "
-        line = f"{mark}{k.name[:20]:<20} pop={k.total_population:>7} {len(k.sites)}s"
+        line = f"{mark}{k.name[:18]:<18} pop={k.total_population:>6} {len(k.sites)}s"
         console.print(x0, y, line, fg=color)
+        y += 1
+        spark = _sparkline(k.population_history, SIDEBAR_W - 6)
+        if spark:
+            console.print(x0 + 1, y, spark, fg=tuple(c // 2 + 60 for c in k.color))
+            y += 1
+        if k.leader:
+            title = f"{k.leader.title} {k.leader.name}, age {int(k.leader.age_years)}"
+            console.print(x0 + 1, y, title[: SIDEBAR_W - 3], fg=(170, 170, 170))
+            y += 1
+        if k.hero:
+            console.print(
+                x0 + 1, y, f"champion {k.hero.name}", fg=(255, 210, 100)
+            )
+            y += 1
+    alive_beasts = [b for b in engine.beasts if b.hp > 0]
+    if alive_beasts:
+        console.print(x0, y, f"beasts alive: {len(alive_beasts)}", fg=(255, 120, 0))
         y += 1
     y += 1
     console.print(x0, y, "-- recent events --")
@@ -255,6 +329,8 @@ def main() -> None:
                             tcod.event.KeySym.N6: 5,
                             tcod.event.KeySym.N7: 6,
                             tcod.event.KeySym.N8: 7,
+                            tcod.event.KeySym.N9: 8,
+                            tcod.event.KeySym.N0: 9,
                         }
                         if ev.sym in digits:
                             mode_idx = digits[ev.sym]

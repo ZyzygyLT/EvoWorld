@@ -11,10 +11,6 @@ from __future__ import annotations
 import itertools
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
 
 
 class SocialForm(IntEnum):
@@ -73,6 +69,47 @@ class Site:
             self.category = "Town"
 
 
+# -- Leaders & heroes ------------------------------------------------------------
+
+
+@dataclass
+class Leader:
+    """A named figure heading a kingdom (monarch, chief, elder...)."""
+
+    id: int
+    name: str
+    kingdom_id: int
+    title: str  # King / Chief / Elder ...
+    born_month: int
+    died_month: int | None = None
+    battles_won: int = 0
+    battles_lost: int = 0
+
+    @property
+    def age_years(self) -> float:
+        end = self.died_month if self.died_month is not None else self.born_month
+        return (end - self.born_month) / 12
+
+
+@dataclass
+class Hero:
+    """A champion that can turn the tide of battles (GDD §7)."""
+
+    id: int
+    name: str
+    kingdom_id: int
+    strength: float  # multiplier on army power
+    battle_deeds: list[str] = field(default_factory=list)
+
+    @classmethod
+    def roll_strength(cls, rng) -> float:
+        # heroes are rare and variable: 1.5x .. 3x army multiplier
+        return float(1.5 + rng.random() * 1.5)
+
+
+# -- Kingdoms & wars ---------------------------------------------------------------
+
+
 @dataclass
 class Kingdom:
     id: int
@@ -87,6 +124,9 @@ class Kingdom:
     army_pos: tuple[int, int] | None = None
     war_exhaustion: int = 0  # months at war, drives government shifts
     years_since_founding: int = 0
+    leader: Leader | None = None
+    hero: Hero | None = None
+    population_history: list[int] = field(default_factory=list)  # yearly samples
 
     @property
     def aggression(self) -> int:
@@ -113,13 +153,35 @@ class War:
     side_a: Kingdom
     side_b: Kingdom
     start_month: int
+    name: str = ""  # "The War of X"
+    cause: str = ""  # border friction / site dispute
     end_month: int | None = None
     victor: Kingdom | None = None
     battles: int = 0
+    total_dead: int = 0
+    battle_sites: list[tuple[int, int]] = field(default_factory=list)
 
     @property
     def is_over(self) -> bool:
         return self.end_month is not None
+
+
+@dataclass
+class Beast:
+    """A lone monster (races with form='site', e.g. Giants) roaming the world.
+
+    Beasts have no government and no diplomacy: they roam, and civilizations
+    near them either hunt them or suffer their raids.
+    """
+
+    id: int
+    name: str
+    race: Race
+    x: int
+    y: int
+    hp: int
+    power: int  # kills per raid
+    aggression: int  # 0: passive grazer, 2: aggressive raider
 
 
 # -- Chronicle -----------------------------------------------------------------
@@ -138,6 +200,15 @@ class EventType(IntEnum):
     SITE_CAPTURED = auto()
     KINGDOM_COLLAPSED = auto()
     KINGDOM_ABSORBED = auto()
+    LEADER_CROWNED = auto()
+    LEADER_DIED = auto()
+    HERO_EMERGED = auto()
+    HERO_FELL = auto()
+    BEAST_SIGHTED = auto()
+    BEAST_SLAIN = auto()
+    BEAST_RAMPAGE = auto()
+    ALLIANCE_FORMED = auto()
+    ALLIANCE_JOINED_WAR = auto()
 
 
 @dataclass(frozen=True)
@@ -162,6 +233,7 @@ class Event:
 @dataclass
 class Chronicle:
     """Append-only historical log (GDD §7)."""
+
     events: list[Event] = field(default_factory=list)
 
     def log(
@@ -188,9 +260,12 @@ __all__ = [
     "GovernmentType",
     "TRIBAL_GOVERNMENT",
     "Site",
+    "Leader",
+    "Hero",
     "Kingdom",
     "Relation",
     "War",
+    "Beast",
     "Event",
     "EventType",
     "Chronicle",
