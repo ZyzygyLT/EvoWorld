@@ -218,6 +218,7 @@ class EventType(IntEnum):
     ALLIANCE_FORMED = auto()
     ALLIANCE_JOINED_WAR = auto()
     MILESTONE = auto()
+    REBELLION = auto()
 
 
 @dataclass(frozen=True)

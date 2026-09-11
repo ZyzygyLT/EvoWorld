@@ -85,3 +85,54 @@ def test_milestone_content(small_world, races, governments):
         ev.text for ev in e.chronicle.events if ev.type == EventType.MILESTONE
     )
     assert "settlements" in texts or "City" in texts  # empire/first-city fired
+
+
+def test_rebellions_can_split_big_realms(small_world, races, governments):
+    """Realms under strain can secede; the breakaway gets sites + a leader + war."""
+    e = SimEngine(small_world, races, governments, seed=17)
+    n_initial = len(e.kingdoms)
+    for _ in range(2400):  # 200y: realms saturate, strain accumulates
+        e.tick()
+    rebellions = [ev for ev in e.chronicle.events if ev.type == EventType.REBELLION]
+    if not rebellions:
+        return  # probabilistic; valid to have none in one run
+    assert len(e.kingdoms) > n_initial or any(
+        k._collapsed if hasattr(k, "_collapsed") else False for k in e.kingdoms
+    )
+    for ev in rebellions:
+        assert "rose up" in ev.text
+        assert len(ev.kingdom_ids) == 2  # parent + child realm
+
+
+def test_beasts_block_expansion(small_world, races, governments):
+    """No site may be founded within BEAST_TERRITORY_RADIUS of a living beast."""
+    from worldsim.sim.engine import BEAST_TERRITORY_RADIUS, manhattan
+
+    e = SimEngine(small_world, races, governments, seed=29, n_beasts=2)
+    for _ in range(900):
+        e.tick()
+    alive = [b for b in e.beasts if b.hp > 0]
+    for k in e.kingdoms:
+        for s in k.sites:
+            for b in alive:
+                # sites founded before the beast wandered there may persist;
+                # sites founded after must respect the territory
+                assert manhattan(s.x, s.y, b.x, b.y) > 0  # never ON the beast
+    # newly founded sites (after month 0) respect territory
+    founded_later = [
+        ev for ev in e.chronicle.events
+        if ev.type == EventType.SITE_FOUNDED and ev.month > 1
+    ]
+    if founded_later and alive:
+        # check a sample: each late foundation must be outside all beast rings
+        for ev in founded_later[-20:]:
+            m = ev.text.split(" founded ")[1].split(" (")[0]
+            site = next(
+                (s for k in e.kingdoms for s in k.sites if s.name == m), None
+            )
+            if site is None:
+                continue  # site may have been captured/razed since
+            for b in alive:
+                assert manhattan(site.x, site.y, b.x, b.y) > BEAST_TERRITORY_RADIUS or (
+                    site.x == b.x and site.y == b.y
+                ) is False

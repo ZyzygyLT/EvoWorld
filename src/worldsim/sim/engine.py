@@ -52,6 +52,12 @@ HERO_DEATH_CHANCE = 0.08  # per battle fought (win or lose)
 N_BEASTS = 2
 BEAST_HUNT_POWER = 150  # population-power needed to slay one beast unit
 BEAST_RAID_RANGE = 3  # manhattan distance to hit a site
+BEAST_TERRITORY_RADIUS = 6  # giants claim land: no new sites may be founded inside
+
+# rebellions
+REBELLION_MIN_SITES = 8  # big realms can split
+REBELLION_CHANCE_MONTHLY = 0.0008  # per month once strained (runaway guard below)
+MAX_KINGDOMS = 12  # hard cap: rebellions stop splitting at this count
 
 
 def manhattan(ax: int, ay: int, bx: int, by: int) -> int:
@@ -363,6 +369,7 @@ class SimEngine:
         self._resolve_wars()
         for k in self.kingdoms:
             self._maybe_shift_government(k)
+        self._maybe_rebellion()
         self._cleanup_collapsed()
         self._sample_history()
         self._check_milestones()
@@ -457,6 +464,12 @@ class SimEngine:
                 continue
             if manhattan(origin.x, origin.y, x, y) > EXPANSION_DISTANCE:
                 continue
+            # giants claim land: no settlement may be founded in their territory
+            if any(
+                b.hp > 0 and manhattan(b.x, b.y, x, y) <= BEAST_TERRITORY_RADIUS
+                for b in self.beasts
+            ):
+                continue
             site = self._make_site(k, x, y)
             k.sites.append(site)
             self._occupancy[y, x] = k.id + 1
@@ -534,22 +547,31 @@ class SimEngine:
                 else:
                     self._set_relation(a, b, Relation.TENSION if roll < 0.5 else Relation.PEACE)
 
-    def _war_name(self, a: Kingdom, b: Kingdom) -> str:
-        """Named wars: 'The War of <site>' if a capture follows later, else by leaders."""
-        if a.leader and b.leader:
-            return f"The War of {a.leader.name}'s Fall" if self.rng.random() < 0.5 else (
-                f"The War of {b.leader.name}'s Wrath"
-            )
-        return f"The {a.name}-{b.name} War"
+    def _war_name(self, a: Kingdom, b: Kingdom) -> tuple[str, str]:
+        """Named wars: prefer a border site the aggressor covets; else leader-based."""
+        # find the closest site pair between the two realms
+        best: Site | None = None
+        best_d = 1 << 30
+        for sa in a.sites:
+            for sb in b.sites:
+                d = manhattan(sa.x, sa.y, sb.x, sb.y)
+                if d < best_d:
+                    best_d, best = d, sb
+        if best is not None and self.rng.random() < 0.6:
+            return f"The War of {best.name}", f"disputed lands around {best.name}"
+        if a.leader and b.leader and self.rng.random() < 0.5:
+            return f"The War of {b.leader.name}'s Wrath", "border friction"
+        return f"The {a.name}-{b.name} War", "border friction"
 
     def _declare_war(self, a: Kingdom, b: Kingdom) -> None:
+        name, cause = self._war_name(a, b)
         war = War(
             id=self._next_war_id,
             side_a=a,
             side_b=b,
             start_month=self.month,
-            name=self._war_name(a, b),
-            cause="border friction" if self.rng.random() < 0.7 else "disputed lands",
+            name=name,
+            cause=cause,
         )
         self._next_war_id += 1
         self.wars.append(war)
@@ -762,6 +784,66 @@ class SimEngine:
                     war.end_month = self.month
                     war.victor = other
                     self._end_war(war)
+
+    # -- rebellions -----------------------------------------------------------
+
+    def _maybe_rebellion(self) -> None:
+        """Big realms under strain can split: distant sites secede.
+
+        Trigger conditions (any): prolonged war exhaustion, or a saturated
+        militarized regime. The new realm takes ~half the sites. Capped at
+        MAX_KINGDOMS to avoid runaway fragmentation (41-kingdom worlds).
+        """
+        if len(self.kingdoms) >= MAX_KINGDOMS:
+            return
+        for k in list(self.kingdoms):
+            if len(k.sites) < REBELLION_MIN_SITES:
+                continue
+            strain = k.war_exhaustion > 24 or (
+                len(k.sites) >= MAX_SITES and k.government.militarization >= 40
+            )
+            if not strain:
+                continue
+            if self.rng.random() >= REBELLION_CHANCE_MONTHLY:
+                continue
+
+            # the farthest half of sites secedes (distance to capital)
+            cap = k.capital
+            if cap is None:
+                continue
+            ranked = sorted(
+                k.sites,
+                key=lambda s: -manhattan(cap.x, cap.y, s.x, s.y),
+            )
+            n_secede = max(2, len(k.sites) // 2)
+            seceders = [s for s in ranked[:n_secede] if not s.is_capital]
+            if len(seceders) < 2:
+                continue
+
+            new_k = Kingdom(
+                id=len(self.kingdoms),
+                name=self.namegen.kingdom_name(k.race.form),
+                race=k.race,
+                government=k.government,
+                color=tuple(int(c) for c in self.rng.integers(60, 256, size=3)),
+            )
+            for s in seceders:
+                k.sites.remove(s)
+                new_k.sites.append(s)
+                self._occupancy[s.y, s.x] = new_k.id + 1
+            new_k.total_population = sum(s.population for s in new_k.sites)
+            k.total_population = sum(s.population for s in k.sites)
+            self._crown_leader(new_k)
+            self.kingdoms.append(new_k)
+            self.chronicle.log(
+                self.month,
+                EventType.REBELLION,
+                f"{len(seceders)} settlements of {k.name} rose up and founded "
+                f"{new_k.name} under {new_k.leader.title} {new_k.leader.name}!",
+                (k.id, new_k.id),
+            )
+            # the old realm wants its land back: immediate war
+            self._declare_war(k, new_k)
 
     # -- government evolution (GDD §4) -----------------------------------------
 

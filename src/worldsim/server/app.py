@@ -194,6 +194,7 @@ def delete_world(world_id: int) -> dict:
 
 def _tick_payload(eng: SimEngine) -> dict:
     """Compact per-month payload for the live stream."""
+    heat = eng.battle_heat()
     return {
         "type": "tick",
         "month": eng.month,
@@ -223,6 +224,7 @@ def _tick_payload(eng: SimEngine) -> dict:
                 ),
                 "at_war": k.at_war,
                 "color": list(k.color),
+                "population_history": k.population_history,
             }
             for k in eng.kingdoms
         ],
@@ -235,6 +237,13 @@ def _tick_payload(eng: SimEngine) -> dict:
             {"name": b.name, "x": b.x, "y": b.y, "alive": b.hp > 0}
             for b in eng.beasts
         ],
+        "battle_heat": {
+            "max": float(heat.max()),
+            "cells": [
+                {"x": int(x), "y": int(y), "v": float(heat[y, x])}
+                for y, x in zip(heat.nonzero()[0], heat.nonzero()[1], strict=True)
+            ],
+        },
         "events": [
             {"month": e.month, "type": e.type.name, "text": e.text}
             for e in eng.chronicle.recent(12)

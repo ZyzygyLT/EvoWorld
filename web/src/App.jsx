@@ -16,6 +16,7 @@ export default function App() {
     const [speed, setSpeed] = useState(1);
     const [busy, setBusy] = useState(false);
     const [selected, setSelected] = useState(null);
+    const [mapMode, setMapMode] = useState('biome');
     const wsRef = useRef(null);
 
     const refreshList = () => {
@@ -84,6 +85,8 @@ export default function App() {
                 <WorldMap
                     state={state}
                     tick={tick}
+                    mapMode={mapMode}
+                    onMapMode={setMapMode}
                     onSiteClick={(k) => setSelected(k)}
                     onBackgroundClick={() => setSelected(null)}
                 />

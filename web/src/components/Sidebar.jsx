@@ -52,6 +52,13 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                     <div style={{ fontSize: 11, color: '#8b949e' }}>
                         pop {selected.population.toLocaleString()} · {selected.sites.length} sites
                     </div>
+                    {/* population history sparkline */}
+                    {selected.population_history?.length > 1 && (
+                        <PopulationChart
+                            values={selected.population_history}
+                            color={`rgb(${selected.color[0]},${selected.color[1]},${selected.color[2]})`}
+                        />
+                    )}
                     <button style={{ ...btn, marginTop: 6, fontSize: 11 }} onClick={() => onSelect(null)}>
                         close
                     </button>
@@ -160,6 +167,29 @@ function ChronicleFeed({ events }) {
                 ))}
             </div>
         </>
+    );
+}
+
+/** Inline SVG population history chart for a kingdom. */
+function PopulationChart({ values, color }) {
+    const W = 300, H = 50;
+    const lo = Math.min(...values);
+    const hi = Math.max(...values);
+    const rng = Math.max(1, hi - lo);
+    const pts = values.map((v, i) => {
+        const x = (i / Math.max(1, values.length - 1)) * W;
+        const y = H - 4 - ((v - lo) / rng) * (H - 8);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    return (
+        <div style={{ marginTop: 6 }}>
+            <svg width={W} height={H} style={{ background: '#0d1117', borderRadius: 4 }}>
+                <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" />
+            </svg>
+            <div style={{ fontSize: 10, color: '#8b949e' }}>
+                population over {values.length} years — min {lo.toLocaleString()} · max {hi.toLocaleString()}
+            </div>
+        </div>
     );
 }
 

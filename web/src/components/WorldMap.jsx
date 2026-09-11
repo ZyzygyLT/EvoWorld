@@ -5,7 +5,7 @@ import { biomeColor } from '../biomes.js';
  * Canvas world map with pan/zoom + political overlay + site markers.
  * Re-fits the camera on every world load; survives canvas resizes.
  */
-export default function WorldMap({ state, tick, mode = 'biome', onSiteClick, onBackgroundClick }) {
+export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode }) {
     const canvasRef = useRef(null);
     const viewRef = useRef(null);   // null => needs fit
     const dragRef = useRef(null);
@@ -30,33 +30,14 @@ export default function WorldMap({ state, tick, mode = 'biome', onSiteClick, onB
                 const i = (y * W + x) * 4;
                 let [r, g, b] = c;
                 if (world.rivers[y][x]) { r = 90; g = 160; b = 255; }
+                if (mapMode === 'political') { r = r * 0.35 + 20; g = g * 0.35 + 20; b = b * 0.35 + 20; }
                 img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
-            }
-        }
-        // battle heat overlay baked when mode=battles
-        if (mode === 'battles' && world.battle_heat) {
-            let max = 0;
-            for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
-                if (world.battle_heat[y][x] > max) max = world.battle_heat[y][x];
-            if (max > 0) {
-                for (let y = 0; y < H; y++) {
-                    for (let x = 0; x < W; x++) {
-                        const v = world.battle_heat[y][x];
-                        if (v > 0) {
-                            const n = v / max;
-                            const i = (y * W + x) * 4;
-                            img.data[i] = Math.min(255, 120 + n * 135);
-                            img.data[i + 1] = 80 * (1 - n) + 30;
-                            img.data[i + 2] = 60 * (1 - n) + 30;
-                        }
-                    }
-                }
             }
         }
         ctx.putImageData(img, 0, 0);
         baseRef.current = cv;
         viewRef.current = null; // NEW world -> camera must re-fit
-    }, [world, mode, W, H]);
+    }, [world, mapMode, W, H]);
 
     const draw = useCallback(() => {
         const canvas = canvasRef.current;
@@ -71,12 +52,23 @@ export default function WorldMap({ state, tick, mode = 'biome', onSiteClick, onB
 
         ctx.drawImage(baseRef.current, x, y, W * scale, H * scale);
 
+        // live battle heatmap (cells with v>0) on top of the base
+        if (tick?.battle_heat?.cells?.length && mapMode === 'battles') {
+            const max = tick.battle_heat.max || 1;
+            for (const c of tick.battle_heat.cells) {
+                const n = c.v / max;
+                ctx.fillStyle = `rgba(${Math.round(120 + n * 135)},${Math.round(80 * (1 - n) + 30)},${Math.round(60 * (1 - n) + 30)},${0.25 + n * 0.75})`;
+                ctx.fillRect(x + c.x * scale, y + c.y * scale, scale, scale);
+            }
+        }
+
         if (tick) {
-            // territory cells
+            // territory cells (always in political; subtle in battles)
+            const terrAlpha = mapMode === 'political' ? 0.35 : (mapMode === 'battles' ? 0.15 : 0.25);
             for (const k of tick.kingdoms) {
                 const [r, g, b] = k.color;
                 for (const s of k.sites) {
-                    ctx.fillStyle = `rgba(${r},${g},${b},0.35)`;
+                    ctx.fillStyle = `rgba(${r},${g},${b},${terrAlpha})`;
                     ctx.fillRect(x + s.x * scale, y + s.y * scale, scale, scale);
                 }
             }
@@ -173,6 +165,15 @@ export default function WorldMap({ state, tick, mode = 'biome', onSiteClick, onB
         return () => window.removeEventListener('keydown', onKey);
     }, [draw]);
 
+    // biome name for hover tooltip (IDs: 0-6, 8-16; 7 unused)
+    const BIOME_LABELS = {
+        0: 'OCEAN', 1: 'SWAMP', 2: 'MARSH', 3: 'GRASSLAND', 4: 'DESERT',
+        5: 'CONIFER FOREST', 6: 'BROADLEAF FOREST', 8: 'BADLANDS', 9: 'MOUNTAIN',
+        10: 'PEAK', 11: 'ICE', 12: 'ICE', 13: 'ICE', 14: 'SMALL HILLS',
+        15: 'SHRUBLAND', 16: 'HILL',
+    };
+    const biomeName = (id) => BIOME_LABELS[id] || '?';
+
     const toGrid = (e) => {
         const canvas = canvasRef.current;
         const rect = canvas.getBoundingClientRect();
@@ -201,7 +202,18 @@ export default function WorldMap({ state, tick, mode = 'biome', onSiteClick, onB
             draw();
         } else {
             const g = toGrid(e);
-            setHover(g ? `(${g.gx},${g.gy})` : '');
+            if (g && world && tick) {
+                const biome = biomeName(world.biome[g.gy][g.gx]);
+                const river = world.rivers[g.gy][g.gx] ? ' · river' : '';
+                let owner = '';
+                for (const k of tick.kingdoms)
+                    for (const s of k.sites)
+                        if (s.x === g.gx && s.y === g.gy) { owner = ` · ${k.name} (${s.name})`; break; }
+                let beast = '';
+                for (const b of tick.beasts)
+                    if (b.alive && b.x === g.gx && b.y === g.gy) beast = ` · ${b.name}`;
+                setHover(`(${g.gx},${g.gy}) ${biome}${river}${owner}${beast}`);
+            } else setHover('');
         }
     };
     const onUp = (e) => {
@@ -236,6 +248,25 @@ export default function WorldMap({ state, tick, mode = 'biome', onSiteClick, onB
 
     return (
         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+            {/* map mode selector */}
+            <div style={{ position: 'absolute', top: 6, left: 6, zIndex: 5, display: 'flex', gap: 4 }}>
+                {['biome', 'political', 'battles'].map(m => (
+                    <button
+                        key={m}
+                        onClick={() => onMapMode && onMapMode(m)}
+                        style={{
+                            background: mapMode === m ? '#2f81f7' : '#161b22e0',
+                            border: '1px solid #30363d',
+                            color: mapMode === m ? '#fff' : '#8b949e',
+                            borderRadius: 4,
+                            padding: '2px 10px',
+                            cursor: 'pointer',
+                            fontSize: 12,
+                            textTransform: 'capitalize',
+                        }}
+                    >{m}</button>
+                ))}
+            </div>
             <canvas
                 ref={canvasRef}
                 style={{ width: '100%', height: '100%', cursor: 'grab', display: 'block' }}
