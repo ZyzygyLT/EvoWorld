@@ -258,9 +258,8 @@ def main() -> None:
                         }
                         if ev.sym in digits:
                             mode_idx = digits[ev.sym]
-                if isinstance(ev, tcod.event.MouseMotion):
-                    if ev.tile is not None:
-                        hover = tile_info(engine, ev.tile.x, ev.tile.y)
+                if isinstance(ev, tcod.event.MouseMotion) and ev.tile is not None:
+                    hover = tile_info(engine, ev.tile.x, ev.tile.y)
 
 
 if __name__ == "__main__":
