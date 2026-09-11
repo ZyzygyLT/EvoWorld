@@ -32,16 +32,19 @@ from worldsim.sim.models import (
 from worldsim.worldgen import SEA_LEVEL, World
 
 EXPANSION_DISTANCE = 10
-WAR_DISTANCE = 20  # original was 8, which kings never reached; 20 yields real contact
+WAR_DISTANCE = 28  # contact radius for diplomacy; 20 left kingdoms in static peace
 MAX_SITES = 20
 CIVILIZED_CIVS = 2
 TRIBAL_CIVS = 2
 WAR_DURATION_MAX = 60  # months
 GOV_SHIFT_MIN_YEARS = 10  # stability floor before government can change
+GOV_SHIFT_COOLDOWN_YEARS = 25  # no golden-age flip-flopping between shifts
+EXPANSIONIST_WAR_CHANCE = 0.006  # per month per saturated kingdom pair in contact
 
 # leaders
-LEADER_LIFESPAN_MEAN = 40 * 12  # months (40 years ruling)
-LEADER_LIFESPAN_STD = 10 * 12
+LEADER_REIGN_MEAN = 40 * 12  # months
+LEADER_REIGN_STD = 10 * 12
+LEADER_REIGN_MIN = 5 * 12
 # heroes
 HERO_EMERGE_CHANCE = 0.02  # per battle won
 HERO_DEATH_CHANCE = 0.08  # per battle fought (win or lose)
@@ -86,6 +89,7 @@ class SimEngine:
         self._next_leader_id = 1
         self._next_hero_id = 1
         self._next_beast_id = 1
+        self._milestones: set[str] = set()  # each milestone fires exactly once
         self._spawn_kingdoms(n_civilized, n_tribal)
         self._spawn_beasts(n_beasts)
 
@@ -190,12 +194,17 @@ class SimEngine:
 
     def _crown_leader(self, k: Kingdom) -> None:
         title = "Chief" if k.race.form == "tribal" else "King"
+        reign = max(
+            LEADER_REIGN_MIN,
+            float(self.rng.normal(LEADER_REIGN_MEAN, LEADER_REIGN_STD)),
+        )
         leader = Leader(
             id=self._next_leader_id,
             name=self.namegen.name(),
             kingdom_id=k.id,
             title=title,
             born_month=self.month,
+            expected_death_month=self.month + int(reign),
         )
         self._next_leader_id += 1
         k.leader = leader
@@ -207,20 +216,25 @@ class SimEngine:
         )
 
     def _succession(self, k: Kingdom) -> None:
-        """Kill aged leaders and crown heirs."""
+        """Leaders die on their pre-rolled death month and are succeeded."""
         leader = k.leader
         if leader is None or leader.died_month is not None:
             return
-        lifespan = float(self.rng.normal(LEADER_LIFESPAN_MEAN, LEADER_LIFESPAN_STD))
-        if lifespan < 12:
-            lifespan = 12
-        if self.month - leader.born_month >= lifespan:
+        if leader.expected_death_month is None:
+            # migration path for leaders created before the field existed
+            reign = max(
+                LEADER_REIGN_MIN,
+                float(self.rng.normal(LEADER_REIGN_MEAN, LEADER_REIGN_STD)),
+            )
+            leader.expected_death_month = self.month + int(reign)
+        if self.month >= leader.expected_death_month:
             leader.died_month = self.month
             self.chronicle.log(
                 self.month,
                 EventType.LEADER_DIED,
                 f"{leader.title} {leader.name} of {k.name} died at age "
-                f"{int(leader.age_years)} after {leader.battles_won} victories.",
+                f"{int(leader.reign_years(self.month))} after "
+                f"{leader.battles_won} victories.",
                 (k.id,),
             )
             self._crown_leader(k)
@@ -351,6 +365,57 @@ class SimEngine:
             self._maybe_shift_government(k)
         self._cleanup_collapsed()
         self._sample_history()
+        self._check_milestones()
+
+    def _check_milestones(self) -> None:
+        """Fire world-historic achievements exactly once (GDD §7 highlights)."""
+        m = self._milestones
+
+        def milestone(key: str, text: str, k: Kingdom | None = None) -> None:
+            if key in m:
+                return
+            m.add(key)
+            ids = (k.id,) if k else ()
+            self.chronicle.log(self.month, EventType.MILESTONE, f"★ {text}", ids)
+
+        # firsts
+        cities = [s for k in self.kingdoms for s in k.sites if s.category == "City"]
+        if cities:
+            owner = next(k for k in self.kingdoms if cities[0] in k.sites)
+            milestone(
+                "first_city",
+                f"{owner.name} raised the world's first City: {cities[0].name}.",
+                owner,
+            )
+        if any(w.battles > 0 for w in self.wars):
+            milestone("first_battle", "The first battle in history was fought.")
+        heroes = [k for k in self.kingdoms if k.hero]
+        if heroes:
+            milestone(
+                "first_hero",
+                f"The first champion in history, {heroes[0].hero.name}, walks the land.",
+                heroes[0],
+            )
+        if any(e.type == EventType.BEAST_SLAIN for e in self.chronicle.events):
+            milestone("first_beast_slain", "A monster was slain for the first time.")
+        # empires
+        empire = next((k for k in self.kingdoms if len(k.sites) >= MAX_SITES), None)
+        if empire:
+            milestone(
+                "first_empire",
+                f"{empire.name} became the first realm to hold {MAX_SITES} settlements.",
+                empire,
+            )
+        populous = next((k for k in self.kingdoms if k.total_population >= 10_000), None)
+        if populous:
+            milestone(
+                "ten_thousand",
+                f"{populous.name} became the first realm to reach 10,000 souls.",
+                populous,
+            )
+        # world age
+        if self.month >= 100 * 12:
+            milestone("century", "A full century of recorded history has passed.")
 
     def _sample_history(self) -> None:
         if self.month % 12 == 0:
@@ -431,12 +496,34 @@ class SimEngine:
                 combined_aggr = a.aggression + b.aggression
                 if current == Relation.ALLIANCE:
                     continue  # alliances persist while in contact
+
+                # power disparity: the strong eye the weak (new dynamics)
+                pop_a = max(1, a.total_population)
+                pop_b = max(1, b.total_population)
+                power_ratio = max(pop_a, pop_b) / min(pop_a, pop_b)
+                disparity_bonus = 0.0
+                if power_ratio >= 1.5:
+                    stronger = a if pop_a > pop_b else b
+                    if stronger.aggression >= 3:
+                        disparity_bonus = 0.05 * min(2.0, power_ratio - 0.5)
+
+                # expansionist pressure: saturated kingdoms want their
+                # neighbor's land (GDD: worlds must stay dynamic after fill-up)
+                expansionist = (
+                    len(a.sites) >= MAX_SITES and len(b.sites) >= MAX_SITES
+                )
+                expansionist_chance = EXPANSIONIST_WAR_CHANCE if expansionist else 0.0
+
                 roll = self.rng.random()
-                if combined_aggr >= 4 and roll < 0.10:
+                base_war_chance = 0.10 if combined_aggr >= 4 else (
+                    0.08 if combined_aggr >= 3 else 0.03
+                )
+                war_chance = base_war_chance + disparity_bonus + expansionist_chance
+                if roll < war_chance:
                     self._declare_war(a, b)
-                elif combined_aggr >= 3 and roll < 0.08:
+                elif roll < war_chance + 0.08:
                     self._set_relation(a, b, Relation.TENSION)
-                elif roll < 0.02:
+                elif roll < war_chance + 0.10:
                     self._set_relation(a, b, Relation.ALLIANCE)
                     self.chronicle.log(
                         self.month,
@@ -686,12 +773,12 @@ class SimEngine:
         if self.month % 12 != 0:  # evaluate yearly
             return
         civ_govs = [g for g in self.governments if g is not TRIBAL_GOVERNMENT]
-        # prolonged losing war -> military dictatorship
+
+        # prolonged losing war -> military dictatorship (always allowed: survival)
         losing_war = any(
             not w.is_over
             and k in (w.side_a, w.side_b)
             and w.battles > 6
-            and (w.victor is not k)  # victor None while ongoing
             and (
                 k.total_population
                 < (w.side_b if w.side_a is k else w.side_a).total_population * 0.5
@@ -702,9 +789,34 @@ class SimEngine:
             new_gov = next(g for g in civ_govs if g.name == "Military Dictatorship")
             self._change_government(k, new_gov, "amid a losing war")
             return
+
+        # cooldown: no flip-flopping between golden-age shifts
+        if self.month - k.last_gov_shift_month >= GOV_SHIFT_COOLDOWN_YEARS * 12:
+            self._golden_age_or_peace_shifts(k, civ_govs)
+
+        # military dictatorship reverts after its war ends
+        if k.government.name == "Military Dictatorship" and not k.at_war:
+            won_war = any(
+                w.is_over and w.victor is k for w in self.wars
+            )
+            if won_war or k.war_exhaustion == 0:
+                new_gov = next(
+                    (g for g in civ_govs if g.name == "Absolute Monarchy"),
+                    civ_govs[0],
+                )
+                self._change_government(
+                    k, new_gov, "as the wartime junta ceded power"
+                )
+
+    def _golden_age_or_peace_shifts(self, k: Kingdom, civ_govs: list) -> None:
+        """Golden-age democratization and long-peace constitutional shifts."""
         # high prosperity + size + peace -> democracy / technocracy
         prosperous = sum(s.popcap for s in k.sites) > 800 and not k.at_war
-        if prosperous and k.government.name not in ("Democracy", "Technocracy"):
+        if prosperous and k.government.name not in (
+            "Democracy",
+            "Technocracy",
+            "Military Dictatorship",
+        ):
             options = [g for g in civ_govs if g.name in ("Democracy", "Technocracy")]
             choice = options[int(self.rng.integers(0, len(options)))]
             self._change_government(k, choice, "in a golden age")
@@ -720,6 +832,7 @@ class SimEngine:
         old = k.government.name
         k.government = new_gov
         k.war_exhaustion = 0
+        k.last_gov_shift_month = self.month
         self.chronicle.log(
             self.month,
             EventType.GOVERNMENT_CHANGED,

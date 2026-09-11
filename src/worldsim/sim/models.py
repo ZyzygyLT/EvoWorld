@@ -82,13 +82,20 @@ class Leader:
     title: str  # King / Chief / Elder ...
     born_month: int
     died_month: int | None = None
+    expected_death_month: int | None = None  # rolled ONCE at crowning
     battles_won: int = 0
     battles_lost: int = 0
 
     @property
     def age_years(self) -> float:
+        """Reign length in years up to death (for living leaders use reign_years)."""
         end = self.died_month if self.died_month is not None else self.born_month
-        return (end - self.born_month) / 12
+        return max(0.0, (end - self.born_month) / 12)
+
+    def reign_years(self, now_month: int) -> float:
+        """Reign length in years for a living (or dead) leader as of now_month."""
+        end = self.died_month if self.died_month is not None else now_month
+        return max(0.0, (end - self.born_month) / 12)
 
 
 @dataclass
@@ -127,6 +134,7 @@ class Kingdom:
     leader: Leader | None = None
     hero: Hero | None = None
     population_history: list[int] = field(default_factory=list)  # yearly samples
+    last_gov_shift_month: int = -1_000_000  # cooldown for government shifts
 
     @property
     def aggression(self) -> int:
@@ -209,6 +217,7 @@ class EventType(IntEnum):
     BEAST_RAMPAGE = auto()
     ALLIANCE_FORMED = auto()
     ALLIANCE_JOINED_WAR = auto()
+    MILESTONE = auto()
 
 
 @dataclass(frozen=True)

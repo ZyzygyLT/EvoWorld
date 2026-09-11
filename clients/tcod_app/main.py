@@ -217,7 +217,8 @@ def draw_sidebar(console: tcod.console.Console, engine: SimEngine) -> None:
             console.print(x0 + 1, y, spark, fg=tuple(c // 2 + 60 for c in k.color))
             y += 1
         if k.leader:
-            title = f"{k.leader.title} {k.leader.name}, age {int(k.leader.age_years)}"
+            age = int(k.leader.reign_years(engine.month))
+            title = f"{k.leader.title} {k.leader.name}, age {age}"
             console.print(x0 + 1, y, title[: SIDEBAR_W - 3], fg=(170, 170, 170))
             y += 1
         if k.hero:

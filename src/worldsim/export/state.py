@@ -46,7 +46,8 @@ def engine_to_dict(engine: SimEngine) -> dict:
                     {
                         "name": k.leader.name,
                         "title": k.leader.title,
-                        "age_years": round(k.leader.age_years, 1),
+                        "age_years": round(k.leader.reign_years(engine.month), 1),
+                        "reign_years": round(k.leader.reign_years(engine.month), 1),
                         "battles_won": k.leader.battles_won,
                         "battles_lost": k.leader.battles_lost,
                     }
