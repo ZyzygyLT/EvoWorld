@@ -2,7 +2,7 @@
 
 Run:  uv run python clients/tcod_app/main.py [--seed N]
 Keys: r new world | space pause/run | 1-8 map modes | +/- speed
-      mouse hover: tile info | F12: toggle chronicle | ESC: quit
+      mouse hover: tile info | ESC: quit
 """
 
 from __future__ import annotations
@@ -72,23 +72,21 @@ def draw_map(console: tcod.console.Console, engine: SimEngine, mode: str) -> Non
     world_w, world_h = w.width, w.height_tiles
 
     if mode == "biome":
-        ch = np.full((world_h, world_w), ord(" "), dtype=np.int32)
+        ch = np.full((world_h, world_w), 250, dtype=np.int32)  # '·' dot
         fg = np.zeros((world_h, world_w, 3), dtype=np.uint8)
         for b, color in COLORS.items():
             mask = w.biome == int(b)
             fg[mask] = color
-            ch[mask] = 250  # '·' dot
         bg = fg // 2
-        # rivers
-        ch[w.rivers] = 247  # '≈'
-        fg[w.rivers] = (120, 180, 255)
-        console.rgb[:, :world_w]["ch"] = ch
-        console.rgb[:, :world_w]["fg"] = fg
-        console.rgb[:, :world_w]["bg"] = bg
+        sub = console.rgb[:world_h, :world_w]
+        sub["ch"] = ch
+        sub["fg"] = fg
+        sub["bg"] = bg
+        sub[w.rivers]["ch"] = 247  # '≈'
+        sub[w.rivers]["fg"] = (120, 180, 255)
 
     elif mode == "political":
-        # biome base dimmed
-        ch = np.full((world_h, world_w), ord(" "), dtype=np.int32)
+        ch = np.full((world_h, world_w), ord("#"), dtype=np.int32)
         fg = np.zeros((world_h, world_w, 3), dtype=np.uint8)
         bg = np.zeros((world_h, world_w, 3), dtype=np.uint8)
         for b, color in COLORS.items():
@@ -98,10 +96,11 @@ def draw_map(console: tcod.console.Console, engine: SimEngine, mode: str) -> Non
         for k in engine.kingdoms:
             mask = terr == k.id
             bg[mask] = k.color
-            ch[mask] = ord("#")
-        console.rgb[:, :world_w]["ch"] = ch
-        console.rgb[:, :world_w]["fg"] = fg
-        console.rgb[:, :world_w]["bg"] = bg
+            fg[mask] = (255, 255, 255)
+        sub = console.rgb[:world_h, :world_w]
+        sub["ch"] = ch
+        sub["fg"] = fg
+        sub["bg"] = bg
         # sites as letters (over the base)
         for k in engine.kingdoms:
             for s in k.sites:
@@ -123,7 +122,7 @@ def draw_map(console: tcod.console.Console, engine: SimEngine, mode: str) -> Non
         elif mode == "drainage":
             layer = w.drainage
             hot, cold = (160, 110, 60), (245, 245, 245)
-        else:  # prosperity
+        else:  # prosperity / rivers share the prosperity gradient base
             layer = w.prosperity
             hot, cold = (60, 200, 90), (245, 245, 245)
         fg = np.zeros((world_h, world_w, 3), dtype=np.uint8)
@@ -132,19 +131,19 @@ def draw_map(console: tcod.console.Console, engine: SimEngine, mode: str) -> Non
                 np.array(cold[c]) * (1 - layer) + np.array(hot[c]) * layer
             ).astype(np.uint8)
         ch = np.full((world_h, world_w), 250, dtype=np.int32)
-        console.rgb[:, :world_w]["ch"] = ch
-        console.rgb[:, :world_w]["fg"] = fg
-        console.rgb[:, :world_w]["bg"] = np.zeros_like(fg)
+        sub = console.rgb[:world_h, :world_w]
+        sub["ch"] = ch
+        sub["fg"] = fg
+        sub["bg"] = np.zeros_like(fg)
         if mode == "rivers" or mode == "height":
-            sub = console.rgb[:world_h, :world_w]
             sub[w.rivers]["ch"] = 247
             sub[w.rivers]["fg"] = (120, 180, 255)
 
 
 def draw_sidebar(console: tcod.console.Console, engine: SimEngine) -> None:
     x0 = MAP_W + 1
-    console.draw_frame(x0 - 1, 0, SIDEBAR_W, H, title="Chronicle")
-    # kingdoms summary
+    console.draw_frame(x0 - 1, 0, SIDEBAR_W, H)
+    console.print(x0 + 1, 0, "Chronicle", fg=(255, 255, 255))
     y = 2
     console.print(x0, y, f"Year {engine.month // 12}  Month {engine.month}")
     y += 1
@@ -168,7 +167,7 @@ def draw_sidebar(console: tcod.console.Console, engine: SimEngine) -> None:
 
 
 def draw_status(
-    console: tcod.console.Console, engine: SimEngine, mode: str, speed: int, paused: bool
+    console: tcod.console.Console, mode: str, speed: int, paused: bool
 ) -> None:
     console.print(1, 0, f"[{mode}]{' PAUSED' if paused else f' x{speed}'}", fg=(255, 255, 0))
 
@@ -196,70 +195,72 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
-    tcod.console_set_custom_font(str(FONT), tcod.FONT_LAYOUT_ASCII_INROW)
-    console = tcod.console.Console(*console_args(W, H))
-    root = tcod.console_init_root(W, H, "worldsim", renderer=tcod.RENDERER_SDL2)
+    # Andux_cp866ish.png: 128x192 px = 16x16 grid of 8x12 tiles (ASCII in-row)
+    tileset = tcod.tileset.load_tilesheet(FONT, 16, 16, list(range(256)))
+    with tcod.context.new(
+        columns=W, rows=H, tileset=tileset, title="worldsim"
+    ) as context:
+        console = context.new_console()
 
-    engine = build_engine(args.seed)
-    mode_idx = 0
-    speed = 1
-    paused = True
-    frame = 0
-    hover = ""
+        engine = build_engine(args.seed)
+        mode_idx = 0
+        speed = 1
+        paused = True
+        hover = ""
 
-    while not tcod.console_is_window_closed():
-        draw_map(console, engine, MODES[mode_idx])
-        draw_sidebar(console, engine)
-        draw_status(console, engine, MODES[mode_idx], speed, paused)
-        if hover:
-            console.print(1, H - 1, hover[: MAP_W - 2], fg=(255, 255, 255))
-        console.blit(console, 0, 0, W, H, root, 0, 0)
-        tcod.console_flush()
+        while True:
+            console.clear()
+            draw_map(console, engine, MODES[mode_idx])
+            draw_sidebar(console, engine)
+            draw_status(console, MODES[mode_idx], speed, paused)
+            if hover:
+                console.print(1, H - 1, hover[: MAP_W - 2], fg=(255, 255, 255))
+            context.present(console)
 
-        # advance simulation according to speed
-        if not paused:
-            for _ in range(speed):
-                engine.tick()
-        frame += 1
+            # advance simulation according to speed
+            if not paused:
+                for _ in range(speed):
+                    engine.tick()
 
-        # input
-        for ev in tcod.event.wait(timeout=0.01):
-            if isinstance(ev, tcod.event.Quit):
-                raise SystemExit
-            if isinstance(ev, tcod.event.KeyDown):
-                if ev.sym == tcod.event.KeySym.ESCAPE:
+            # input: drain all pending events
+            for ev in tcod.event.get():
+                context.convert_event(ev)
+                if isinstance(ev, tcod.event.Quit):
                     raise SystemExit
-                elif ev.sym == tcod.event.KeySym.SPACE:
-                    paused = not paused
-                elif ev.sym == tcod.event.KeySym.r:
-                    seed = np.random.default_rng().integers(0, 99999)
-                    engine = build_engine(int(seed))
-                elif ev.sym == tcod.event.KeySym.MINUS or ev.sym == tcod.event.KeySym.KP_MINUS:
-                    speed = max(1, speed // 2)
-                elif ev.sym in (tcod.event.KeySym.EQUAL, tcod.event.KeySym.KP_PLUS):
-                    speed = min(32, speed * 2)
-                elif ev.sym == tcod.event.KeySym.N_1:
-                    mode_idx = 0
-                elif ev.sym == tcod.event.KeySym.N_2:
-                    mode_idx = 1
-                elif ev.sym == tcod.event.KeySym.N_3:
-                    mode_idx = 2
-                elif ev.sym == tcod.event.KeySym.N_4:
-                    mode_idx = 3
-                elif ev.sym == tcod.event.KeySym.N_5:
-                    mode_idx = 4
-                elif ev.sym == tcod.event.KeySym.N_6:
-                    mode_idx = 5
-                elif ev.sym == tcod.event.KeySym.N_7:
-                    mode_idx = 6
-                elif ev.sym == tcod.event.KeySym.N_8:
-                    mode_idx = 7
-            if isinstance(ev, tcod.event.MouseMotion):
-                hover = tile_info(engine, ev.tile.x or 0, ev.tile.y or 0)
-
-
-def console_args(w: int, h: int) -> tuple[int, int]:
-    return w, h
+                if isinstance(ev, tcod.event.KeyDown):
+                    if ev.sym == tcod.event.KeySym.ESCAPE:
+                        raise SystemExit
+                    elif ev.sym == tcod.event.KeySym.SPACE:
+                        paused = not paused
+                    elif ev.sym == tcod.event.KeySym.r:
+                        seed = int(np.random.default_rng().integers(0, 99999))
+                        engine = build_engine(seed)
+                    elif ev.sym in (
+                        tcod.event.KeySym.MINUS,
+                        tcod.event.KeySym.KP_MINUS,
+                    ):
+                        speed = max(1, speed // 2)
+                    elif ev.sym in (
+                        tcod.event.KeySym.EQUAL,
+                        tcod.event.KeySym.KP_PLUS,
+                    ):
+                        speed = min(32, speed * 2)
+                    else:
+                        digits = {
+                            tcod.event.KeySym.N1: 0,
+                            tcod.event.KeySym.N2: 1,
+                            tcod.event.KeySym.N3: 2,
+                            tcod.event.KeySym.N4: 3,
+                            tcod.event.KeySym.N5: 4,
+                            tcod.event.KeySym.N6: 5,
+                            tcod.event.KeySym.N7: 6,
+                            tcod.event.KeySym.N8: 7,
+                        }
+                        if ev.sym in digits:
+                            mode_idx = digits[ev.sym]
+                if isinstance(ev, tcod.event.MouseMotion):
+                    if ev.tile is not None:
+                        hover = tile_info(engine, ev.tile.x, ev.tile.y)
 
 
 if __name__ == "__main__":
