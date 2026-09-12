@@ -1,11 +1,12 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { biomeColor } from '../biomes.js';
+import StatsPanel from './StatsPanel.jsx';
 
 /**
  * Canvas world map with pan/zoom + political overlay + site markers.
  * Re-fits the camera on every world load; survives canvas resizes.
  */
-export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode }) {    const canvasRef = useRef(null);
+export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection }) {    const canvasRef = useRef(null);
     const viewRef = useRef(null);   // null => needs fit
     const dragRef = useRef(null);
     const [hover, setHover] = useState('');
@@ -272,15 +273,30 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         const d = dragRef.current;
         dragRef.current = null;
         if (!d || d.moved) return;
-        // click (not drag): did we hit a site?
+        // click (not drag): resolve what was hit, with tolerance
         if (tick && d.gx !== undefined) {
-            const hit = (() => {
-                for (const k of tick.kingdoms)
-                    for (const s of k.sites)
-                        if (s.x === d.gx && s.y === d.gy) return { k, s };
-                return null;
-            })();
-            if (hit && onSiteClick) { onSiteClick(hit.k, hit.s); return; }
+            const v = viewRef.current;
+            const tol = Math.max(1, Math.ceil(3 / v.scale)); // ~3px tolerance in grid cells
+            let hitSite = null, hitK = null;
+            let bestDist = Infinity;
+            for (const k of tick.kingdoms) {
+                for (const s of k.sites) {
+                    const dist = Math.abs(s.x - d.gx) + Math.abs(s.y - d.gy);
+                    if (dist <= tol && dist < bestDist) {
+                        bestDist = dist;
+                        hitSite = s; hitK = k;
+                    }
+                }
+            }
+            if (hitSite && onSiteClick) { onSiteClick(hitK, hitSite); return; }
+            // no site nearby: in realms mode, clicking claimed land selects the owner
+            if (tick.influence && mapMode === 'realms') {
+                const owner = tick.influence[d.gy]?.[d.gx];
+                if (owner >= 0 && tick.kingdoms[owner] && onSiteClick) {
+                    onSiteClick(tick.kingdoms[owner], tick.kingdoms[owner].sites[0]);
+                    return;
+                }
+            }
             if (onBackgroundClick) onBackgroundClick();
         }
     };
@@ -325,6 +341,14 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                 onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
                 onMouseLeave={onUp} onWheel={onWheel}
             />
+            {/* floating stats panel for the selected kingdom (always visible) */}
+            {stats && (
+                <StatsPanel
+                    stats={stats}
+                    govDesc={govDesc}
+                    onClose={onClearSelection}
+                />
+            )}
             {hover && (
                 <div style={{ position: 'absolute', bottom: 4, left: 4, background: '#000c', padding: '2px 6px', fontSize: 11 }}>
                     {hover} · F = re-fit

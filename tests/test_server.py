@@ -91,3 +91,45 @@ def test_server_meta(tmp_path, monkeypatch):
     assert "elected" in demo["description"]  # real description text
     race_names = [r["name"] for r in meta["races"]]
     assert "Dwarf" in race_names and "Giant" in race_names
+
+
+def test_kingdom_stats_endpoint(tmp_path, monkeypatch):
+    c = _fresh_app(monkeypatch, tmp_path)
+    r = c.post("/api/worlds", json={"seed": 42, "width": 80, "height": 50, "months": 60})
+    wid = r.json()["id"]
+
+    r = c.get(f"/api/worlds/{wid}/stats/0")
+    assert r.status_code == 200
+    stats = r.json()
+    for key in (
+        "name", "race", "government", "era", "era_progress", "population",
+        "peak_population", "sites", "territory_tiles", "influence_tiles",
+        "military_power", "militarization_pct", "wars_won", "wars_lost",
+        "wars_total", "relations", "population_history", "recent_events",
+    ):
+        assert key in stats, f"stats missing {key}"
+    assert isinstance(stats["relations"], list)
+    assert isinstance(stats["recent_events"], list)
+
+    # 404 for a bogus kingdom
+    r = c.get(f"/api/worlds/{wid}/stats/999")
+    assert r.status_code == 404
+
+
+def test_ws_selected_stats_stream(tmp_path, monkeypatch):
+    c = _fresh_app(monkeypatch, tmp_path)
+    r = c.post("/api/worlds", json={"seed": 7, "width": 80, "height": 50, "months": 0})
+    wid = r.json()["id"]
+
+    with c.websocket_connect(f"/api/ws/{wid}") as ws:
+        data = ws.receive_json()
+        assert data["selected_stats"] is None  # nothing selected yet
+        ws.send_json({"selected": 0, "speed": 1})
+        data2 = ws.receive_json()
+        assert data2["selected_stats"] is not None
+        assert data2["selected_stats"]["id"] == 0
+        assert "military_power" in data2["selected_stats"]
+        # deselection clears it
+        ws.send_json({"selected": None})
+        data3 = ws.receive_json()
+        assert data3["selected_stats"] is None

@@ -1,13 +1,11 @@
 import React from 'react';
 
-/** Right sidebar: kingdoms panel, ongoing wars, chronicle feed with filters. */
+/** Right sidebar: kingdoms list, ongoing wars, chronicle feed with filters.
+ * (Per-kingdom stats live in the floating StatsPanel over the map.) */
 export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect }) {
     const [showKingdoms, setShowKingdoms] = React.useState(true);
     if (!tick) return <aside style={aside}>waiting for simulation…</aside>;
     const kStyle = (k) => ({ color: `rgb(${k.color[0]},${k.color[1]},${k.color[2]})` });
-    const govDesc = meta?.governments?.find(g => g.name === selected?.government)?.description;
-    const ERAS = ['Stone Age', 'Bronze Age', 'Iron Age', 'Classical', 'Medieval'];
-    const eraName = (lvl) => ERAS[lvl] ?? '?';
 
     return (
         <aside style={aside}>
@@ -26,52 +24,6 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                     >x{s}</button>
                 ))}
             </div>
-
-            {/* selected kingdom inspector */}
-            {selected && (
-                <div style={{ ...panel, border: '1px solid #30363d', marginBottom: 8 }}>
-                    <div style={kStyle(selected)}><strong>{selected.name}</strong></div>
-                    <div style={{ fontSize: 11, color: '#8b949e' }}>
-                        {selected.race} · {selected.government}{selected.golden_age ? ' ✨' : ''}
-                    </div>
-                    {selected.tech_level !== undefined && (
-                        <div style={{ fontSize: 11, color: '#d2a8ff' }}>
-                            {eraName(selected.tech_level)} — pop {selected.population.toLocaleString()} · {selected.sites.length} sites
-                        </div>
-                    )}
-                    {govDesc && (
-                        <div style={{ fontSize: 11, marginTop: 4, fontStyle: 'italic', color: '#adbbca' }}>
-                            “{govDesc}”
-                        </div>
-                    )}
-                    {selected.leader && (
-                        <div style={{ fontSize: 11, marginTop: 4 }}>
-                            {selected.leader.title} {selected.leader.name} — reign{' '}
-                            {selected.leader.reign_years}y ({selected.leader.battles_won}W/
-                            {selected.leader.battles_lost}L)
-                        </div>
-                    )}
-                    {selected.hero && (
-                        <div style={{ fontSize: 11, color: '#f0c674' }}>
-                            champion {selected.hero.name} (x{selected.hero.strength},{' '}
-                            {selected.hero.deeds} deeds)
-                        </div>
-                    )}
-                    <div style={{ fontSize: 11, color: '#8b949e' }}>
-                        pop {selected.population.toLocaleString()} · {selected.sites.length} sites
-                    </div>
-                    {/* population history sparkline */}
-                    {selected.population_history?.length > 1 && (
-                        <PopulationChart
-                            values={selected.population_history}
-                            color={`rgb(${selected.color[0]},${selected.color[1]},${selected.color[2]})`}
-                        />
-                    )}
-                    <button style={{ ...btn, marginTop: 6, fontSize: 11 }} onClick={() => onSelect(null)}>
-                        close
-                    </button>
-                </div>
-            )}
 
             {/* kingdoms: collapsed panel with its own scroll (crónica below keeps space) */}
             <div style={sectionTitle}>

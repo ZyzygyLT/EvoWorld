@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
 
@@ -30,12 +31,18 @@ from worldsim.worldgen import WorldConfig
 from worldsim.worldgen.pipeline import generate_world
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
-DB_PATH = Path(__file__).resolve().parent / "worlds.db"
 
-engine_db = create_engine(
-    f"sqlite:///{DB_PATH}",
-    connect_args={"check_same_thread": False},
-)
+# Persistence: sqlite by default; set WORLDSIM_DB to any SQLAlchemy URL to
+# switch (e.g. postgresql+psycopg://user:pass@host/worldsim for PostgreSQL).
+_DB_URL = os.environ.get("WORLDSIM_DB")
+if _DB_URL:
+    engine_db = create_engine(_DB_URL, pool_pre_ping=True)
+else:
+    DB_PATH = Path(__file__).resolve().parent / "worlds.db"
+    engine_db = create_engine(
+        f"sqlite:///{DB_PATH}",
+        connect_args={"check_same_thread": False},
+    )
 SessionLocal = sessionmaker(bind=engine_db)
 
 
@@ -193,7 +200,21 @@ def delete_world(world_id: int) -> dict:
         return {"deleted": world_id}
 
 
-def _tick_payload(eng: SimEngine) -> dict:
+@app.get("/api/worlds/{world_id}/stats/{kingdom_id}")
+def get_kingdom_stats(world_id: int, kingdom_id: int) -> dict:
+    """Rich stats for one kingdom (deterministic replay to the saved month)."""
+    row = _load_row(world_id)
+    state = json.loads(row.state_json)
+    eng = _build_engine(row.seed, row.width, row.height)
+    for _ in range(state["month"]):
+        eng.tick()
+    k = next((k for k in eng.kingdoms if k.id == kingdom_id), None)
+    if k is None:
+        raise HTTPException(404, f"kingdom {kingdom_id} not found")
+    return eng.kingdom_stats(k)
+
+
+def _tick_payload(eng: SimEngine, selected_id: int | None = None) -> dict:
     """Compact per-month payload for the live stream."""
     heat = eng.battle_heat()
     return {
@@ -252,6 +273,11 @@ def _tick_payload(eng: SimEngine) -> dict:
             {"month": e.month, "type": e.type.name, "text": e.text}
             for e in eng.chronicle.recent(12)
         ],
+        "selected_stats": (
+            eng.kingdom_stats(next(k for k in eng.kingdoms if k.id == selected_id))
+            if selected_id is not None and any(k.id == selected_id for k in eng.kingdoms)
+            else None
+        ),
     }
 
 
@@ -274,6 +300,7 @@ async def ws_world(ws: WebSocket, world_id: int) -> None:
 
         speed = 1
         paused = False
+        selected_id: int | None = None
         while True:
             # drain any client messages without blocking the stream
             try:
@@ -282,13 +309,17 @@ async def ws_world(ws: WebSocket, world_id: int) -> None:
                     speed = max(1, min(120, int(msg["speed"])))
                 if "pause" in msg:
                     paused = bool(msg["pause"])
+                if "selected" in msg:
+                    selected_id = (
+                        int(msg["selected"]) if msg["selected"] is not None else None
+                    )
             except TimeoutError:
                 pass
 
             if not paused:
                 for _ in range(speed):
                     eng.tick()
-            await ws.send_json(_tick_payload(eng))
+            await ws.send_json(_tick_payload(eng, selected_id))
             # one push every half second: x1 = 2 months/sec (a year per 6s),
             # x48 stays a real fast-forward; readable by humans (GDD pillar 1)
             await asyncio.sleep(0.5)

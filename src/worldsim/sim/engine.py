@@ -719,6 +719,11 @@ class SimEngine:
             w is not war and not w.is_over and war.side_b in (w.side_a, w.side_b)
             for w in self.wars
         )
+        # war record bookkeeping (drives the W/L stats)
+        if war.victor is not None:
+            loser = war.side_b if war.victor is war.side_a else war.side_a
+            war.victor.wars_won += 1
+            loser.wars_lost += 1
 
     def _log_war_end(self, war: War, extra: str = "") -> None:
         v = war.victor
@@ -1128,6 +1133,83 @@ class SimEngine:
         )
 
     # -- queries ---------------------------------------------------------------
+
+    def kingdom_stats(self, k: Kingdom) -> dict:
+        """Rich per-kingdom statistics for the UI inspector panel."""
+        era_mult = 1.0 + ERA_ARMY_BONUS * k.tech_level
+        military = (
+            k.total_population * k.government.militarization / 100
+            * k.race.strength * era_mult
+        )
+        if k.hero:
+            military *= k.hero.strength
+        territory = int((self.territory_map() == k.id).sum())
+        influence = int((self.influence_map() == k.id).sum())
+
+        # war record
+        wars_fought = [w for w in self.wars if k in (w.side_a, w.side_b)]
+        # diplomacy: current relations with every other living kingdom
+        relations_out = []
+        for other in self.kingdoms:
+            if other is k or not other.sites:
+                continue
+            rel = self.get_relation(k, other)
+            relations_out.append(
+                {"name": other.name, "relation": rel.name, "color": list(other.color)}
+            )
+
+        # history from the chronicle (recent events involving this kingdom)
+        my_events = [
+            {"month": e.month, "type": e.type.name, "text": e.text}
+            for e in self.chronicle.of_kingdom(k.id)[-15:]
+        ]
+
+        pop_hist = k.population_history
+        peak = max(pop_hist) if pop_hist else k.total_population
+
+        return {
+            "id": k.id,
+            "name": k.name,
+            "race": k.race.name,
+            "government": k.government.name,
+            "color": list(k.color),
+            "era": ERA_NAMES[k.tech_level],
+            "era_progress": round(min(1.0, k.tech_progress), 3),
+            "population": k.total_population,
+            "peak_population": peak,
+            "sites": len(k.sites),
+            "territory_tiles": territory,
+            "influence_tiles": influence,
+            "military_power": round(military, 1),
+            "militarization_pct": k.government.militarization,
+            "wars_won": k.wars_won,
+            "wars_lost": k.wars_lost,
+            "wars_total": len(wars_fought),
+            "ongoing_wars": sum(1 for w in wars_fought if not w.is_over),
+            "golden_age": k.golden_age_until > self.month,
+            "civilized": k.civilized,
+            "leader": (
+                {
+                    "name": k.leader.name,
+                    "title": k.leader.title,
+                    "reign_years": round(k.leader.reign_years(self.month), 1),
+                    "battles_won": k.leader.battles_won,
+                    "battles_lost": k.leader.battles_lost,
+                }
+                if k.leader else None
+            ),
+            "hero": (
+                {
+                    "name": k.hero.name,
+                    "strength": round(k.hero.strength, 1),
+                    "deeds": len(k.hero.battle_deeds),
+                }
+                if k.hero else None
+            ),
+            "relations": relations_out,
+            "population_history": pop_hist,
+            "recent_events": my_events,
+        }
 
     def territory_map(self) -> np.ndarray:
         """(H, W) kingdom id (-1 none) for political overlay."""

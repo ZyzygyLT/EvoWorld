@@ -19,6 +19,12 @@ export default function App() {
     const [mapMode, setMapMode] = useState('biome');
     const wsRef = useRef(null);
 
+    // live rich stats for the selected kingdom (streamed by the server)
+    const stats = tick?.selected_stats ?? null;
+    const govDesc = stats
+        ? meta?.governments?.find(g => g.name === stats.government)?.description
+        : null;
+
     const refreshList = () => {
         fetch('/api/worlds').then(r => r.json()).then(setWorlds);
     };
@@ -41,12 +47,16 @@ export default function App() {
         });
     };
 
-    // keep the server informed about speed/pause changes
+    // keep the server informed about speed/pause/selection changes
     useEffect(() => {
         if (wsRef.current && wsRef.current.readyState === 1) {
-            wsRef.current.send(JSON.stringify({ speed, pause: paused }));
+            wsRef.current.send(JSON.stringify({
+                speed,
+                pause: paused,
+                selected: selected?.id ?? null,
+            }));
         }
-    }, [speed, paused]);
+    }, [speed, paused, selected]);
 
     const createWorld = () => {
         setBusy(true);
@@ -89,6 +99,9 @@ export default function App() {
                     onMapMode={setMapMode}
                     onSiteClick={(k) => setSelected(k)}
                     onBackgroundClick={() => setSelected(null)}
+                    stats={stats}
+                    govDesc={govDesc}
+                    onClearSelection={() => setSelected(null)}
                 />
                 <Sidebar
                     tick={tick}

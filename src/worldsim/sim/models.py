@@ -139,6 +139,8 @@ class Kingdom:
     tech_progress: float = 0.0  # yearly accumulation; 1.0 = era advance
     civilized: bool = False  # tribes civilize upon reaching the Iron Age
     golden_age_until: int = -1  # month until which popcap is boosted
+    wars_won: int = 0
+    wars_lost: int = 0
 
     @property
     def aggression(self) -> int:

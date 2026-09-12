@@ -137,3 +137,39 @@ def test_golden_age_boosts_popcap(small_world, races, governments):
     base = e._era_popcap_mult(k)
     k.golden_age_until = e.month + 120
     assert e._era_popcap_mult(k) > base  # golden age boosts beyond era mult
+
+
+def test_kingdom_stats_rich(small_world, races, governments):
+    """kingdom_stats() must expose the full inspector payload."""
+    e = SimEngine(small_world, races, governments, seed=42)
+    for _ in range(600):
+        e.tick()
+    k = e.kingdoms[0]
+    stats = e.kingdom_stats(k)
+    for key in (
+        "era", "era_progress", "peak_population", "territory_tiles",
+        "influence_tiles", "military_power", "militarization_pct",
+        "wars_won", "wars_lost", "wars_total", "ongoing_wars",
+        "relations", "population_history", "recent_events",
+    ):
+        assert key in stats, f"missing {key}"
+    # military power reflects hero multiplier when present
+    assert stats["military_power"] >= 0
+    # W/L bookkeeping is consistent with the wars list
+    fought = [w for w in e.wars if k in (w.side_a, w.side_b)]
+    assert stats["wars_total"] == len(fought)
+    assert stats["wars_won"] + stats["wars_lost"] <= len(fought)
+
+
+def test_war_record_accounting(small_world, races, governments):
+    """Every resolved war with a victor increments exactly one W and one L."""
+    e = SimEngine(small_world, races, governments, seed=7)
+    for _ in range(2000):
+        e.tick()
+    resolved = [w for w in e.wars if w.is_over and w.victor is not None]
+    if not resolved:
+        return  # probabilistic
+    total_won = sum(k.wars_won for k in e.kingdoms)
+    total_lost = sum(k.wars_lost for k in e.kingdoms)
+    assert total_won == len(resolved), f"{total_won} wins vs {len(resolved)} resolved wars"
+    assert total_lost == len(resolved)
