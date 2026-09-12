@@ -135,6 +135,10 @@ class Kingdom:
     hero: Hero | None = None
     population_history: list[int] = field(default_factory=list)  # yearly samples
     last_gov_shift_month: int = -1_000_000  # cooldown for government shifts
+    tech_level: int = 0  # 0 Stone .. 4 Medieval
+    tech_progress: float = 0.0  # yearly accumulation; 1.0 = era advance
+    civilized: bool = False  # tribes civilize upon reaching the Iron Age
+    golden_age_until: int = -1  # month until which popcap is boosted
 
     @property
     def aggression(self) -> int:
@@ -219,6 +223,11 @@ class EventType(IntEnum):
     ALLIANCE_JOINED_WAR = auto()
     MILESTONE = auto()
     REBELLION = auto()
+    TECH_ERA = auto()
+    COLONY_FOUNDED = auto()
+    INDEPENDENCE = auto()
+    GOLDEN_AGE = auto()
+    PLAGUE = auto()
 
 
 @dataclass(frozen=True)

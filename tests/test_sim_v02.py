@@ -47,7 +47,11 @@ def test_war_has_name_and_cause(small_world, races, governments):
     assert e.wars, "expected wars in a long run"
     for w in e.wars:
         assert w.name, "every war must have a name"
-        assert w.cause in ("border friction", "disputed lands") or "alliance" in w.cause
+        assert (
+            w.cause in ("border friction", "disputed lands")
+            or "disputed lands around" in w.cause
+            or "alliance" in w.cause
+        )
     declared = [ev for ev in e.chronicle.events if ev.type == EventType.WAR_DECLARED]
     for ev in declared:
         assert ev.text.count("began") == 1  # named wars in the chronicle text

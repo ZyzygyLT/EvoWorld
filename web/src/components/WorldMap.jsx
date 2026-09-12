@@ -5,8 +5,7 @@ import { biomeColor } from '../biomes.js';
  * Canvas world map with pan/zoom + political overlay + site markers.
  * Re-fits the camera on every world load; survives canvas resizes.
  */
-export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode }) {
-    const canvasRef = useRef(null);
+export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode }) {    const canvasRef = useRef(null);
     const viewRef = useRef(null);   // null => needs fit
     const dragRef = useRef(null);
     const [hover, setHover] = useState('');
@@ -15,29 +14,63 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     const W = world?.width ?? 0;
     const H = world?.height ?? 0;
 
-    // paint the biome base into an offscreen canvas once per state
+    // paint the biome base into an offscreen canvas once per state/mode
     const baseRef = useRef(null);
+    const baseKeyRef = useRef('');
     useEffect(() => {
         if (!world) return;
+        // repaint only when the world, mode, or month-bucket changes (not every tick)
+        const bucket = Math.floor((tick?.month ?? 0) / 6);
+        const key = `${state?.seed}|${mapMode}|${bucket}`;
+        if (baseKeyRef.current === key && baseRef.current) return;
+        const is_new_world = !baseKeyRef.current.startsWith(`${state?.seed}|`);
+        baseKeyRef.current = key;
         const cv = document.createElement('canvas');
         cv.width = W; cv.height = H;
-        const ctx = cv.getContext('2d');
+        const ctx = cv.getContext('2d', { willReadFrequently: true });
         const img = ctx.createImageData(W, H);
         const grid = world.biome;
+        const dim = mapMode === 'political' || mapMode === 'realms';
+        const influence = mapMode === 'realms' ? tick?.influence : null;
         for (let y = 0; y < H; y++) {
             for (let x = 0; x < W; x++) {
                 const c = biomeColor(grid[y][x]);
                 const i = (y * W + x) * 4;
                 let [r, g, b] = c;
                 if (world.rivers[y][x]) { r = 90; g = 160; b = 255; }
-                if (mapMode === 'political') { r = r * 0.35 + 20; g = g * 0.35 + 20; b = b * 0.35 + 20; }
+                if (dim) { r = r * 0.3 + 12; g = g * 0.3 + 12; b = b * 0.3 + 12; }
+                if (influence) {
+                    const kid = influence[y][x];
+                    const k = kid >= 0 && tick?.kingdoms?.[kid];
+                    if (k) {
+                        r = k.color[0] * 0.6 + r * 0.2;
+                        g = k.color[1] * 0.6 + g * 0.2;
+                        b = k.color[2] * 0.6 + b * 0.2;
+                    }
+                }
                 img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
+            }
+        }
+        // realm borders: darker edge where the neighbor tile belongs to another realm
+        if (influence) {
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    const here = influence[y][x];
+                    const right = x + 1 < W ? influence[y][x + 1] : here;
+                    const down = y + 1 < H ? influence[y + 1][x] : here;
+                    if (here !== right || here !== down) {
+                        const i = (y * W + x) * 4;
+                        img.data[i] *= 0.45; img.data[i + 1] *= 0.45; img.data[i + 2] *= 0.45;
+                    }
+                }
             }
         }
         ctx.putImageData(img, 0, 0);
         baseRef.current = cv;
-        viewRef.current = null; // NEW world -> camera must re-fit
-    }, [world, mapMode, W, H]);
+        if (is_new_world) {
+            viewRef.current = null;  // NEW world -> camera must re-fit
+        }
+    }, [world, mapMode, tick, state, W, H]);
 
     const draw = useCallback(() => {
         const canvas = canvasRef.current;
@@ -46,10 +79,21 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         const v = viewRef.current ?? fitView(canvas);
         viewRef.current = v;
         const { x, y, scale } = v;
-        ctx.fillStyle = '#0d1117';
+        // letterbox: deep slate with a subtle dot grid (not flat black)
+        ctx.fillStyle = '#0a0e14';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.imageSmoothingEnabled = false;
+        ctx.fillStyle = '#141b26';
+        for (let gy = 8; gy < canvas.height; gy += 24) {
+            for (let gx = 8; gx < canvas.width; gx += 24) {
+                ctx.fillRect(gx, gy, 2, 2);
+            }
+        }
+        // map frame
+        ctx.strokeStyle = '#30363d';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x - 1, y - 1, W * scale + 2, H * scale + 2);
 
+        ctx.imageSmoothingEnabled = false;
         ctx.drawImage(baseRef.current, x, y, W * scale, H * scale);
 
         // live battle heatmap (cells with v>0) on top of the base
@@ -87,8 +131,12 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                     ctx.lineWidth = 1;
                     ctx.stroke();
                     if (s.is_capital && scale >= 3) {
-                        ctx.fillStyle = '#fff';
+                        // halo'd label for readability over any terrain
                         ctx.font = `${Math.max(8, scale * 2)}px monospace`;
+                        ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+                        ctx.lineWidth = 3;
+                        ctx.strokeText(k.name[0], cx - scale * 0.4, cy - scale * 0.8);
+                        ctx.fillStyle = '#fff';
                         ctx.fillText(k.name[0], cx - scale * 0.4, cy - scale * 0.8);
                     }
                 }
@@ -172,6 +220,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         10: 'PEAK', 11: 'ICE', 12: 'ICE', 13: 'ICE', 14: 'SMALL HILLS',
         15: 'SHRUBLAND', 16: 'HILL',
     };
+    const ERAS = ['Stone Age', 'Bronze', 'Iron', 'Classical', 'Medieval'];
     const biomeName = (id) => BIOME_LABELS[id] || '?';
 
     const toGrid = (e) => {
@@ -208,7 +257,10 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                 let owner = '';
                 for (const k of tick.kingdoms)
                     for (const s of k.sites)
-                        if (s.x === g.gx && s.y === g.gy) { owner = ` · ${k.name} (${s.name})`; break; }
+                        if (s.x === g.gx && s.y === g.gy) {
+                            const era = k.tech_level !== undefined ? ` · ${ERAS[k.tech_level]}` : '';
+                            owner = ` · ${k.name} (${s.name}${era})`;
+                        }
                 let beast = '';
                 for (const b of tick.beasts)
                     if (b.alive && b.x === g.gx && b.y === g.gy) beast = ` · ${b.name}`;
@@ -250,7 +302,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
             {/* map mode selector */}
             <div style={{ position: 'absolute', top: 6, left: 6, zIndex: 5, display: 'flex', gap: 4 }}>
-                {['biome', 'political', 'battles'].map(m => (
+                {['biome', 'realms', 'political', 'battles'].map(m => (
                     <button
                         key={m}
                         onClick={() => onMapMode && onMapMode(m)}

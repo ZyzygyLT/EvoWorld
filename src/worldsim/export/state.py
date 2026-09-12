@@ -64,10 +64,13 @@ def engine_to_dict(engine: SimEngine) -> dict:
                     else None
                 ),
                 "population_history": k.population_history,
+                "tech_level": k.tech_level,
+                "golden_age": k.golden_age_until > engine.month,
                 "territory": (engine.territory_map() == k.id).astype(int).tolist(),
             }
             for k in engine.kingdoms
         ],
+        "influence": engine.influence_map().tolist(),
         "wars": [
             {
                 "id": w.id,

@@ -59,9 +59,38 @@ REBELLION_MIN_SITES = 8  # big realms can split
 REBELLION_CHANCE_MONTHLY = 0.0008  # per month once strained (runaway guard below)
 MAX_KINGDOMS = 12  # hard cap: rebellions stop splitting at this count
 
+# tech eras (the world starts in the Stone Age and advances over centuries)
+ERA_NAMES = ["Stone Age", "Bronze Age", "Iron Age", "Classical Era", "Medieval Era"]
+ERA_POPCAP_BONUS = 0.25  # +25% site popcap per era (urbanization)
+ERA_ARMY_BONUS = 0.15  # +15% military power per era
+ERA_INFLUENCE_RADIUS = 4  # base claim radius at Stone Age ...
+ERA_INFLUENCE_PER_LEVEL = 2  # ... +2 tiles per era
+TECH_BASE_YEARS_PER_ERA = 90  # rough years to advance at tech_bonus 0
+TECH_GOLDEN_AGE_YEARS = 25  # golden age duration
+TECH_GOLDEN_AGE_CHANCE = 0.0015  # monthly chance while prosperous
+PLAGUE_MIN_DENSITY_POP = 8000  # plagues only strike dense realms
+PLAGUE_CHANCE_MONTHLY = 0.0004
+PLAGUE_MORTALITY = (0.10, 0.30)
+COLONY_FOUNDED_MIN_SITES = 12  # saturated-ish realms found colonies
+COLONY_DISTANCE = (15, 30)
+COLONY_INDEPENCE_DISTANCE = 45  # colonies this far declare peaceful independence
+
 
 def manhattan(ax: int, ay: int, bx: int, by: int) -> int:
     return abs(bx - ax) + abs(by - ay)
+
+
+def _golden_angle_color(index: int) -> tuple[int, int, int]:
+    """Distinct, readable kingdom colors via the golden-angle hue walk.
+
+    Fixed S/L keeps every color legible on dark backgrounds (the old
+    random RGB produced near-identical dark purples).
+    """
+    import colorsys
+
+    hue = (index * 0.618033988749895) % 1.0
+    r, g, b = colorsys.hls_to_rgb(hue, 0.55, 0.55)
+    return (int(r * 255), int(g * 255), int(b * 255))
 
 
 class SimEngine:
@@ -96,6 +125,7 @@ class SimEngine:
         self._next_hero_id = 1
         self._next_beast_id = 1
         self._milestones: set[str] = set()  # each milestone fires exactly once
+        self._color_counter = 0  # golden-angle hue assignment
         self._spawn_kingdoms(n_civilized, n_tribal)
         self._spawn_beasts(n_beasts)
 
@@ -131,8 +161,9 @@ class SimEngine:
             name=self.namegen.kingdom_name(race.form),
             race=race,
             government=gov,
-            color=tuple(int(c) for c in self.rng.integers(60, 256, size=3)),
+            color=_golden_angle_color(self._color_counter),
         )
+        self._color_counter += 1
         site = self._make_site(k, x, y, is_capital=True)
         k.sites.append(site)
         self._crown_leader(k)
@@ -155,6 +186,8 @@ class SimEngine:
             popcap *= 1.5
         if is_capital:
             popcap *= 2
+        # urbanization: later eras sustain larger settlements
+        popcap *= self._era_popcap_mult(k)
         category = "Capital" if is_capital else "Village"
         return Site(
             x=x,
@@ -370,6 +403,7 @@ class SimEngine:
         for k in self.kingdoms:
             self._maybe_shift_government(k)
         self._maybe_rebellion()
+        self._tech_and_events()
         self._cleanup_collapsed()
         self._sample_history()
         self._check_milestones()
@@ -627,8 +661,17 @@ class SimEngine:
                 continue
             war.battles += 1
             # armies = militarization % of population, seasoned by race strength
-            pow_a = a.total_population * a.government.militarization / 100 * a.race.strength
-            pow_b = b.total_population * b.government.militarization / 100 * b.race.strength
+            # and era (better weapons win battles)
+            era_mult = 1.0 + ERA_ARMY_BONUS * a.tech_level
+            era_mult_b = 1.0 + ERA_ARMY_BONUS * b.tech_level
+            pow_a = (
+                a.total_population * a.government.militarization / 100
+                * a.race.strength * era_mult
+            )
+            pow_b = (
+                b.total_population * b.government.militarization / 100
+                * b.race.strength * era_mult_b
+            )
             if a.hero:
                 pow_a *= a.hero.strength
             if b.hero:
@@ -845,6 +888,168 @@ class SimEngine:
             # the old realm wants its land back: immediate war
             self._declare_war(k, new_k)
 
+    # -- tech eras, golden ages, plagues, colonies -----------------------------
+
+    def _tech_and_events(self) -> None:
+        for k in list(self.kingdoms):
+            if not k.sites:
+                continue
+            self._progress_tech(k)
+            self._maybe_golden_age(k)
+            self._maybe_plague(k)
+            self._maybe_colony(k)
+
+    def _progress_tech(self, k: Kingdom) -> None:
+        """Yearly tech progress; eras advance and transform the realm."""
+        if self.month % 12 != 0:
+            return
+        # progress: prosperity + government tech bonus + a base rate
+        prosper = sum(s.popcap for s in k.sites) / max(1, len(k.sites))
+        yearly = (0.006 + prosper / 30_000 + k.government.tech_bonus / 3_000) / max(
+            1, TECH_BASE_YEARS_PER_ERA / 100
+        )
+        k.tech_progress += yearly * 100 / 100
+        if k.tech_progress >= 1.0 and k.tech_level < len(ERA_NAMES) - 1:
+            k.tech_progress = 0.0
+            k.tech_level += 1
+            era = ERA_NAMES[k.tech_level]
+            # urbanization: existing settlements can now sustain more people
+            mult = self._era_popcap_mult(k)
+            base_mult = 1.0 + ERA_POPCAP_BONUS * (k.tech_level - 1)
+            for s in k.sites:
+                s.popcap = math.floor(s.popcap * mult / base_mult)
+            self.chronicle.log(
+                self.month,
+                EventType.TECH_ERA,
+                f"{k.name} entered the {era}.",
+                (k.id,),
+            )
+            # tribes entering the Iron Age become civilizations
+            if k.tech_level >= 2 and k.race.form == "tribal" and not k.civilized:
+                k.civilized = True
+                gov = self.governments[
+                    int(self.rng.integers(0, len(self.governments)))
+                ]
+                old = k.government.name
+                k.government = gov
+                k.last_gov_shift_month = self.month
+                self.chronicle.log(
+                    self.month,
+                    EventType.GOVERNMENT_CHANGED,
+                    f"{k.name} left behind the old {old} ways and formed a "
+                    f"{gov.name} as the {era} dawned.",
+                    (k.id,),
+                )
+        elif k.tech_progress >= 1.0:
+            # past the last era: slow continuous urban growth (~+1%/year)
+            k.tech_progress = 0.0
+            for s in k.sites:
+                s.popcap = math.floor(s.popcap * 1.01)
+
+    def _era_popcap_mult(self, k: Kingdom) -> float:
+        mult = 1.0 + ERA_POPCAP_BONUS * k.tech_level
+        if k.golden_age_until > self.month:
+            mult *= 1.5
+        return mult
+
+    def _maybe_golden_age(self, k: Kingdom) -> None:
+        if k.golden_age_until > self.month:
+            return
+        prosperous = (
+            sum(s.popcap for s in k.sites) > 800
+            and not k.at_war
+            and k.tech_level >= 1
+        )
+        if prosperous and self.rng.random() < TECH_GOLDEN_AGE_CHANCE:
+            k.golden_age_until = self.month + TECH_GOLDEN_AGE_YEARS * 12
+            self.chronicle.log(
+                self.month,
+                EventType.GOLDEN_AGE,
+                f"A golden age dawns upon {k.name} — its cities flourish.",
+                (k.id,),
+            )
+
+    def _maybe_plague(self, k: Kingdom) -> None:
+        """Dense realms are struck by pestilence (big-population pressure valve)."""
+        if k.total_population < PLAGUE_MIN_DENSITY_POP:
+            return
+        if self.rng.random() >= PLAGUE_CHANCE_MONTHLY:
+            return
+        rate = float(self.rng.uniform(*PLAGUE_MORTALITY))
+        dead = int(k.total_population * rate)
+        self._apply_population_loss(k, dead)
+        for s in k.sites:
+            self._battle_heat[s.y, s.x] += s.population * rate * 0.5
+        self.chronicle.log(
+            self.month,
+            EventType.PLAGUE,
+            f"A terrible plague ravaged {k.name} — {dead} souls perished.",
+            (k.id,),
+        )
+
+    def _maybe_colony(self, k: Kingdom) -> None:
+        """Saturated realms send settlers far away; distant colonies go independent."""
+        if len(k.sites) < COLONY_FOUNDED_MIN_SITES or len(k.sites) >= MAX_SITES:
+            return
+        if self.month % 6 != 0:  # colonization attempts every 6 months
+            return
+        if self.rng.random() >= 0.25:
+            return
+        cap = k.capital
+        if cap is None:
+            return
+        candidates = self._suitable_tiles(k.race)
+        for _ in range(60):
+            x, y = candidates[int(self.rng.integers(0, len(candidates)))]
+            dist = manhattan(cap.x, cap.y, x, y)
+            if not (COLONY_DISTANCE[0] <= dist <= COLONY_DISTANCE[1]):
+                continue
+            if self._occupancy[y, x] or any(
+                b.hp > 0 and manhattan(b.x, b.y, x, y) <= BEAST_TERRITORY_RADIUS
+                for b in self.beasts
+            ):
+                continue
+            site = self._make_site(k, x, y)
+            k.sites.append(site)
+            self._occupancy[y, x] = k.id + 1
+            if dist >= COLONY_INDEPENCE_DISTANCE and len(self.kingdoms) < MAX_KINGDOMS:
+                # far colony declares peaceful independence
+                k.sites.remove(site)
+                form = (
+                    "civilized"
+                    if k.civilized or k.race.form == "civilized"
+                    else k.race.form
+                )
+                new_k = Kingdom(
+                    id=len(self.kingdoms),
+                    name=self.namegen.kingdom_name(form),
+                    race=k.race,
+                    government=k.government,
+                    color=_golden_angle_color(self._color_counter),
+                )
+                self._color_counter += 1
+                new_k.tech_level = max(0, k.tech_level - 1)
+                new_k.sites.append(site)
+                self._occupancy[site.y, site.x] = new_k.id + 1
+                self._crown_leader(new_k)
+                new_k.total_population = site.population
+                self.kingdoms.append(new_k)
+                self.chronicle.log(
+                    self.month,
+                    EventType.INDEPENDENCE,
+                    f"The distant colony {site.name} declared independence from "
+                    f"{k.name}, founding {new_k.name}!",
+                    (k.id, new_k.id),
+                )
+            else:
+                self.chronicle.log(
+                    self.month,
+                    EventType.COLONY_FOUNDED,
+                    f"{k.name} founded the colony {site.name} in distant lands.",
+                    (k.id,),
+                )
+            return
+
     # -- government evolution (GDD §4) -----------------------------------------
 
     def _maybe_shift_government(self, k: Kingdom) -> None:
@@ -927,6 +1132,36 @@ class SimEngine:
     def territory_map(self) -> np.ndarray:
         """(H, W) kingdom id (-1 none) for political overlay."""
         return self._occupancy - 1
+
+    def influence_map(self) -> np.ndarray:
+        """(H, W) kingdom id per land tile, claimed by the NEAREST site.
+
+        Claim radius grows with tech era (a Medieval realm projects power
+        much further than a Stone Age tribe). Produces province-like
+        political maps (GDD: heatmap of the realms).
+        """
+        h, w = self.world.height.shape
+        best_d = np.full((h, w), np.iinfo(np.int32).max, dtype=np.int32)
+        out = np.full((h, w), -1, dtype=np.int16)
+        land = self.world.height > SEA_LEVEL
+        for k in self.kingdoms:
+            if not k.sites:
+                continue
+            radius = ERA_INFLUENCE_RADIUS + ERA_INFLUENCE_PER_LEVEL * k.tech_level
+            for s in k.sites:
+                x0, x1 = max(0, s.x - radius), min(w, s.x + radius + 1)
+                y0, y1 = max(0, s.y - radius), min(h, s.y + radius + 1)
+                yy, xx = np.mgrid[y0:y1, x0:x1]
+                d = np.abs(xx - s.x) + np.abs(yy - s.y)
+                window_d = np.where(d <= radius, d, np.iinfo(np.int32).max)
+                # update where this site is closer than the current best
+                upd = window_d < best_d[y0:y1, x0:x1]
+                sub_d = best_d[y0:y1, x0:x1]
+                sub_o = out[y0:y1, x0:x1]
+                sub_d[upd] = window_d[upd]
+                sub_o[upd] = k.id
+        out[~land] = -1
+        return out
 
     def battle_heat(self) -> np.ndarray:
         """(H, W) accumulated battle deaths — where history was written."""

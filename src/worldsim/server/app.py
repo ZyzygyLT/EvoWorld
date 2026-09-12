@@ -165,6 +165,7 @@ def create_world(req: CreateWorldRequest) -> dict:
         db.add(row)
         db.commit()
         db.refresh(row)
+        # live-replay needs the influence map too — regenerate on fetch
         return {"id": row.id, "state": state}
 
 
@@ -225,9 +226,12 @@ def _tick_payload(eng: SimEngine) -> dict:
                 "at_war": k.at_war,
                 "color": list(k.color),
                 "population_history": k.population_history,
+                "tech_level": k.tech_level,
+                "golden_age": k.golden_age_until > eng.month,
             }
             for k in eng.kingdoms
         ],
+        "influence": eng.influence_map().tolist(),
         "wars_ongoing": [
             {"name": w.name, "a": w.side_a.name, "b": w.side_b.name,
              "battles": w.battles, "dead": w.total_dead}
