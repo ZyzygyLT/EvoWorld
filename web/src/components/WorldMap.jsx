@@ -30,7 +30,10 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         if (staticKeyRef.current === key && staticRef.current) return;
         staticKeyRef.current = key;
         const grid = world.biome;
-        const elev = world.elevation;  // 0..255 quantized heights (may be absent in old snapshots)
+        // elevation must be a flat W*H array; anything else is ignored
+        // (a shape mismatch once produced NaN hillshade = black land)
+        const rawElev = Array.isArray(world.elevation) && world.elevation.length === W * H
+            ? world.elevation : null;
         // flood fill ocean from the edges -> anything wet left over is a lake
         const lake = new Uint8Array(W * H);
         if (grid) {
@@ -54,9 +57,9 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         }
         // hillshade 0..1 from elevation gradient (fake NW light)
         let shade = null;
-        if (elev) {
+        if (rawElev) {
             shade = new Float32Array(W * H);
-            const at = (x, y) => elev[Math.max(0, Math.min(H - 1, y)) * W + Math.max(0, Math.min(W - 1, x))] / 255;
+            const at = (x, y) => rawElev[Math.max(0, Math.min(H - 1, y)) * W + Math.max(0, Math.min(W - 1, x))] / 255;
             for (let y = 0; y < H; y++) {
                 for (let x = 0; x < W; x++) {
                     const dx = at(x - 1, y) - at(x + 1, y);
@@ -91,7 +94,8 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         const ctx = cv.getContext('2d', { willReadFrequently: true });
         const img = ctx.createImageData(W, H);
         const grid = world.biome;
-        const elev = world.elevation;
+        const elev = Array.isArray(world.elevation) && world.elevation.length === W * H
+            ? world.elevation : null;
         const { lake, shade } = staticRef.current ?? {};
         const isOcean = (x, y) => grid[y][x] === 0;
         const dim = mapMode === 'political' || mapMode === 'realms';
