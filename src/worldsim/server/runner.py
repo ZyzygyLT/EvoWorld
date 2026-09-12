@@ -33,9 +33,11 @@ class WorldRunner:
     """A live simulation shared by all connected clients."""
 
     def __init__(self, world_id: int, seed: int, width: int, height: int,
-                 enabled_races: list[str] | None = None) -> None:
+                 enabled_races: list[str] | None = None,
+                 sea_level: float = 0.2) -> None:
         self.world_id = world_id
         self.enabled_races = enabled_races
+        self.sea_level = sea_level
         self.eng = self._build_engine(seed, width, height)
         self.speed = 1
         self.paused = True
@@ -44,7 +46,8 @@ class WorldRunner:
         self._last_score_month = 0  # league scoring cursor
 
     def _build_engine(self, seed: int, width: int, height: int) -> SimEngine:
-        cfg = WorldConfig(seed=seed, width=width, height=height)
+        cfg = WorldConfig(seed=seed, width=width, height=height,
+                          sea_level=self.sea_level)
         world = generate_world(cfg)
         data_dir = self._data_dir()
         races = load_races(data_dir / "Races.txt")
@@ -163,9 +166,10 @@ class RunnerRegistry:
         self._runners: dict[int, WorldRunner] = {}
 
     def get(self, world_id: int, seed: int, width: int, height: int,
-            enabled_races: list[str] | None = None) -> WorldRunner:
+            enabled_races: list[str] | None = None,
+            sea_level: float = 0.2) -> WorldRunner:
         if world_id not in self._runners:
-            runner = WorldRunner(world_id, seed, width, height, enabled_races)
+            runner = WorldRunner(world_id, seed, width, height, enabled_races, sea_level)
             self._runners[world_id] = runner
         return self._runners[world_id]
 

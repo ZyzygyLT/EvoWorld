@@ -47,22 +47,22 @@ def generate_world(cfg: WorldConfig | None = None, verbose: bool = False) -> Wor
     hm = normalize(hm)
 
     # 6. climate
-    temp = temperature_layer(hm)
+    temp = temperature_layer(hm, sea_level=cfg.sea_level)
     precip = precipitation_layer(rng, hm.shape)
     drain = drainage_layer(rng, hm.shape)
 
     # 7. rivers
-    rivers = generate_rivers(hm, rng, count=cfg.rivers)
+    rivers = generate_rivers(hm, rng, count=cfg.rivers, sea_level=cfg.sea_level)
 
     # 8. biomes
-    biome = classify(hm, temp, precip, drain, rng)
+    biome = classify(hm, temp, precip, drain, rng, sea_level=cfg.sea_level)
 
     # 9. prosperity
     prosper = prosperity(precip, temp, drain)
 
     elapsed = time.perf_counter() - t0
     if verbose:
-        land_pct = (hm > 0.2).mean() * 100
+        land_pct = (hm > cfg.sea_level).mean() * 100
         print(
             f"world generated in {elapsed:.2f}s — "
             f"{cfg.width}x{cfg.height}, seed={cfg.seed}, land={land_pct:.0f}%"

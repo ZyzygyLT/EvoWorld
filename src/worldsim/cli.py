@@ -25,7 +25,8 @@ def cmd_generate(args: argparse.Namespace) -> int:
     from worldsim.worldgen import WorldConfig
     from worldsim.worldgen.pipeline import generate_world
 
-    cfg = WorldConfig(seed=args.seed, width=args.width, height=args.height)
+    cfg = WorldConfig(seed=args.seed, width=args.width, height=args.height,
+                      sea_level=args.sea_level)
     world = generate_world(cfg, verbose=True)
 
     out = Path(args.outdir)
@@ -44,7 +45,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     from worldsim.worldgen.pipeline import generate_world
 
     data = _find_data()
-    cfg = WorldConfig(seed=args.seed, width=args.width, height=args.height)
+    cfg = WorldConfig(seed=args.seed, width=args.width, height=args.height,
+                      sea_level=args.sea_level)
     world = generate_world(cfg, verbose=True)
     races = load_races(data / "Races.txt")
     govs = load_governments(data / "CivilizedGovernment.txt")
@@ -89,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--seed", type=int, default=42)
     g.add_argument("--width", type=int, default=200)
     g.add_argument("--height", type=int, default=80)
+    g.add_argument("--sea-level", type=float, default=0.2,
+                   help="Ocean threshold: 0.12 Pangea, 0.2 normal, 0.32 archipelago")
     modes = ["biome", "height", "temperature", "precipitation", "drainage", "prosperity"]
     g.add_argument("--mode", choices=modes, default="biome")
     g.add_argument("--outdir", default="outputs")
@@ -98,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--seed", type=int, default=42)
     r.add_argument("--width", type=int, default=200)
     r.add_argument("--height", type=int, default=80)
+    r.add_argument("--sea-level", type=float, default=0.2)
     r.add_argument("--ticks", type=int, default=240)
     r.add_argument("--chronicle", default=None, help="Write chronicle log to file")
     r.add_argument("--export", default=None, help="Write full state JSON to file")

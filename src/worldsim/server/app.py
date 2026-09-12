@@ -73,6 +73,7 @@ class CreateWorldRequest(BaseModel):
     mode: str = Field(default="single")  # single | league
     season_years: int = Field(default=300, ge=12, le=2000)
     enabled_races: list[str] | None = Field(default=None)
+    sea_level: float = Field(default=0.2, ge=0.05, le=0.5)
 
 
 class PredictionRequest(BaseModel):
@@ -155,8 +156,9 @@ def _build_engine(
     seed: int, width: int, height: int,
     n_civilized: int = 2, n_tribal: int = 2, n_beasts: int = 2,
     enabled_races: list[str] | None = None,
+    sea_level: float = 0.2,
 ) -> SimEngine:
-    cfg = WorldConfig(seed=seed, width=width, height=height)
+    cfg = WorldConfig(seed=seed, width=width, height=height, sea_level=sea_level)
     world = generate_world(cfg)
     races = load_races(DATA_DIR / "Races.txt")
     govs = load_governments(DATA_DIR / "CivilizedGovernment.txt")
@@ -255,7 +257,7 @@ def create_world(
     eng = _build_engine(
         req.seed, req.width, req.height,
         req.n_civilized, req.n_tribal, req.n_beasts,
-        req.enabled_races,
+        req.enabled_races, req.sea_level,
     )
     for _ in range(req.months):
         eng.tick()
@@ -267,7 +269,7 @@ def create_world(
             width=req.width,
             height=req.height,
             months_simulated=req.months,
-            land_pct=float((eng.world.height > 0.2).mean() * 100),
+            land_pct=float((eng.world.height > req.sea_level).mean() * 100),
             state_json=json.dumps(state),
             created_at=time.strftime("%Y-%m-%d %H:%M:%S"),
             name=req.name or f"World {req.seed}",
@@ -276,12 +278,16 @@ def create_world(
             season_over=0,
             enabled_races_json=json.dumps(req.enabled_races or []),
             owner_user_id=owner.id if owner else None,
+            sea_level=req.sea_level,
         )
         db_.add(row)
         db_.commit()
         db_.refresh(row)
         # seed the runner so POST's engine == canonical runner engine
-        runner = registry.get(row.id, req.seed, req.width, req.height, req.enabled_races)
+        runner = registry.get(
+            row.id, req.seed, req.width, req.height,
+            req.enabled_races, req.sea_level,
+        )
         runner.eng = eng
         return {"id": row.id, "state": state}
 
@@ -319,7 +325,9 @@ def get_kingdom_stats(world_id: int, kingdom_id: int) -> dict:
         enabled = json.loads(row.enabled_races_json or "[]") or None
     except (json.JSONDecodeError, TypeError):
         enabled = None
-    eng = _build_engine(row.seed, row.width, row.height, enabled_races=enabled)
+    sea = row.sea_level if row.sea_level is not None else 0.2
+    eng = _build_engine(row.seed, row.width, row.height,
+                        enabled_races=enabled, sea_level=sea)
     for _ in range(state["month"]):
         eng.tick()
     k = next((k for k in eng.kingdoms if k.id == kingdom_id), None)
@@ -533,7 +541,8 @@ async def ws_world(ws: WebSocket, world_id: int) -> None:
             enabled = json.loads(row.enabled_races_json or "[]") or None
         except (json.JSONDecodeError, TypeError):
             enabled = None
-        runner = registry.get(world_id, row.seed, row.width, row.height, enabled)
+        sea = row.sea_level if row.sea_level is not None else 0.2
+        runner = registry.get(world_id, row.seed, row.width, row.height, enabled, sea)
         # fast-forward the shared engine to the saved month on first attach
         if runner.eng.month == 0 and row.months_simulated > 0:
             for _ in range(row.months_simulated):

@@ -25,6 +25,7 @@ class WorldConfig:
     small_hills: int = 1000
     rivers: int = 12
     margin: float = 0.1  # fraction of each axis kept as guaranteed ocean frame
+    sea_level: float = 0.2  # height threshold for ocean (map presets vary this)
 
     @property
     def mx(self) -> int:
@@ -62,7 +63,7 @@ class World:
         return self.height.shape[0]
 
     def is_land(self, x: int, y: int) -> bool:
-        return self.height[y, x] > SEA_LEVEL
+        return self.height[y, x] > self.config.sea_level
 
     def to_json_dict(self) -> dict:
         return {

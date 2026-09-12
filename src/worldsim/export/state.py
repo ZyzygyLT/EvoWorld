@@ -21,6 +21,8 @@ def engine_to_dict(engine: SimEngine) -> dict:
             "biome": world.biome.tolist(),
             "rivers": world.rivers.astype(int).tolist(),
             "battle_heat": engine.battle_heat().round(2).tolist(),
+            # quantized height 0..255 for client-side hillshade/coasts/lakes
+            "elevation": ((world.height * 255).clip(0, 255)).astype(int).tolist(),
         },
         "kingdoms": [
             {

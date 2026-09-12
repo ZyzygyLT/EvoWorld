@@ -16,7 +16,6 @@ from worldsim.worldgen import SEA_LEVEL
 MIN_RIVER_LENGTH = 3
 MAX_TRACE = 400
 
-
 def lowest_neighbor(height: np.ndarray, x: int, y: int) -> tuple[int, int] | None:
     """Lowest of the 4 cardinal neighbors; None if we are the local minimum."""
     h, w = height.shape
@@ -31,12 +30,13 @@ def lowest_neighbor(height: np.ndarray, x: int, y: int) -> tuple[int, int] | Non
 
 
 def trace_river(
-    height: np.ndarray, rivers: np.ndarray, rng: np.random.Generator, start: tuple[int, int]
+    height: np.ndarray, rivers: np.ndarray, rng: np.random.Generator,
+    start: tuple[int, int], sea_level: float = SEA_LEVEL,
 ) -> list[tuple[int, int]]:
     """Trace one river from `start` downhill until sea / merge / stall. Marks `rivers`."""
     h, w = height.shape
     x, y = start
-    if height[y, x] <= SEA_LEVEL or rivers[y, x]:
+    if height[y, x] <= sea_level or rivers[y, x]:
         return []
 
     path: list[tuple[int, int]] = []
@@ -51,7 +51,7 @@ def trace_river(
             # merge into existing river: mark and stop
             path.append((cx, cy))
             break
-        if height[cy, cx] <= SEA_LEVEL:
+        if height[cy, cx] <= sea_level:
             path.append((cx, cy))
             break
         if (cx, cy) in visited:
@@ -67,7 +67,8 @@ def trace_river(
 
 
 def generate_rivers(
-    height: np.ndarray, rng: np.random.Generator, count: int, max_attempts: int = 4000
+    height: np.ndarray, rng: np.random.Generator, count: int,
+    max_attempts: int = 4000, sea_level: float = SEA_LEVEL,
 ) -> np.ndarray:
     """Try to lay `count` rivers from random high-ground starts."""
     h, w = height.shape
@@ -80,6 +81,6 @@ def generate_rivers(
         y = int(rng.integers(0, h))
         if height[y, x] < 0.8:
             continue
-        if trace_river(height, rivers, rng, (x, y)):
+        if trace_river(height, rivers, rng, (x, y), sea_level):
             laid += 1
     return rivers

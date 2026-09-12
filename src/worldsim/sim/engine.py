@@ -31,7 +31,7 @@ from worldsim.sim.models import (
     Site,
     War,
 )
-from worldsim.worldgen import SEA_LEVEL, World
+from worldsim.worldgen import World
 
 EXPANSION_DISTANCE = 10
 WAR_DISTANCE = 28  # contact radius for diplomacy; 20 left kingdoms in static peace
@@ -174,7 +174,8 @@ class SimEngine:
 
     def _suitable_tiles(self, race: Race) -> list[tuple[int, int]]:
         w = self.world
-        mask = np.isin(w.biome, race.preferred_biomes) & (w.height > SEA_LEVEL)
+        sl = w.config.sea_level
+        mask = np.isin(w.biome, race.preferred_biomes) & (w.height > sl)
         ys, xs = np.nonzero(mask)
         return list(zip(xs.tolist(), ys.tolist(), strict=True))
 
@@ -441,7 +442,8 @@ class SimEngine:
             # roam one step
             dx, dy = self.rng.integers(-1, 2, size=2).tolist()
             nx, ny = beast.x + dx, beast.y + dy
-            if 0 <= nx < w and 0 <= ny < h and self.world.height[ny, nx] > SEA_LEVEL:
+            sl = self.world.config.sea_level
+            if 0 <= nx < w and 0 <= ny < h and self.world.height[ny, nx] > sl:
                 beast.x, beast.y = nx, ny
 
             # nearest kingdom site in raid range
@@ -1445,7 +1447,7 @@ class SimEngine:
         h, w = self.world.height.shape
         best_d = np.full((h, w), np.iinfo(np.int32).max, dtype=np.int32)
         out = np.full((h, w), -1, dtype=np.int16)
-        land = self.world.height > SEA_LEVEL
+        land = self.world.height > self.world.config.sea_level
         for k in self.kingdoms:
             if not k.sites:
                 continue

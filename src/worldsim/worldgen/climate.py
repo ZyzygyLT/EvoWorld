@@ -10,7 +10,7 @@ import numpy as np
 from worldsim.worldgen.noise import perlin_like
 
 
-def temperature(height: np.ndarray) -> np.ndarray:
+def temperature(height: np.ndarray, sea_level: float = 0.2) -> np.ndarray:
     """Latitude gradient modified by altitude (port of original Temperature()).
 
     Equator hot, poles cold; high mountains colder, deep ocean milder.
@@ -20,11 +20,11 @@ def temperature(height: np.ndarray) -> np.ndarray:
     lat = 1.0 - np.abs(2.0 * ys - 1.0)  # 0 at poles, 1 at equator
     lat = np.broadcast_to(lat, (h, w))
 
-    # altitude effect: oceans (<= .2) mild, peaks much colder
+    # altitude effect: oceans (<= sea level) mild, peaks much colder
     alt = np.zeros_like(height)
-    ocean = height <= 0.2
+    ocean = height <= sea_level
     alt[ocean] = 0.05
-    mid = (height > 0.2) & (height <= 0.8)
+    mid = (height > sea_level) & (height <= 0.8)
     alt[mid] = 0.0
     peaks = height > 0.8
     alt[peaks] = (height[peaks] - 0.8) * 3.0

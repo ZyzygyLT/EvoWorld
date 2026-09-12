@@ -30,6 +30,7 @@ class WorldRow(Base):
     season_over = Column(Integer, default=0)  # bool flag once the season ends
     enabled_races_json = Column(String, default="")  # JSON list, "" = all
     owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    sea_level = Column(Float, default=0.2)  # ocean threshold used at generation
 
 
 class ClaimRow(Base):

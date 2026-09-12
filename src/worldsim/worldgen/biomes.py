@@ -43,10 +43,11 @@ def classify(
     precipitation: np.ndarray,
     drainage: np.ndarray,
     rng: np.random.Generator,
+    sea_level: float = SEA_LEVEL,
 ) -> np.ndarray:
     """(H, W) int8 Biome map, same rule order/precedence as the original."""
     shape = height.shape
-    land = height > SEA_LEVEL
+    land = height > sea_level
     biome = np.full(shape, Biome.OCEAN, dtype=np.int8)
 
     roll = rng.random(shape)
@@ -101,7 +102,7 @@ def classify(
     biome[m] = Biome.BADLANDS
 
     # ---- overrides (original applies these last, so they always win) ----
-    biome[height <= SEA_LEVEL] = Biome.OCEAN
+    biome[height <= sea_level] = Biome.OCEAN
     cold_land = (temperature <= 0.2) & (height > 0.15)
     biome[cold_land] = Biome.ICE
     biome[height > MOUNTAIN_LEVEL] = Biome.MOUNTAIN
