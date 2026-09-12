@@ -67,6 +67,13 @@ export default function App() {
 
     const openStream = (id, modeHint) => {
         if (wsRef.current) wsRef.current.close();
+        // refresh the world list first: mode must come from fresh data,
+        // otherwise deep-linked league worlds render as single-player
+        fetch('/api/worlds').then(r => r.json()).then(ws => {
+            setWorlds(ws);
+            const entry = ws.find(w => w.id === id);
+            setWorldMode(modeHint || entry?.mode || 'single');
+        });
         fetch(`/api/worlds/${id}`).then(r => r.json()).then(s => {
             setState(s);
             setWorldId(id);
@@ -148,12 +155,13 @@ export default function App() {
 
     const doClaim = async (kingdomId) => {
         const { token } = getIdentity();
-        let name = getIdentity().name;
-        if (!name) {
-            name = prompt('your oracle name?') || '';
-            if (!name.trim()) return;
+        let userName = getIdentity().name;
+        if (!userName) {
+            // no prompt(): auto-generate an oracle name, editable later in room tab
+            userName = 'Oracle-' + Math.floor(Math.random() * 9000 + 1000);
             const { setIdentityName } = await import('./identity.js');
-            setIdentityName(name.trim());
+            setIdentityName(userName);
+            setToasts(t => [...t.slice(-3), { id: Date.now() + Math.random(), text: `claiming as ${userName} — set your name in the room tab` }]);
         }
         const tok = token || await ensureIdentity();
         const r = await fetch(`/api/worlds/${worldId}/claims`, {
@@ -162,7 +170,7 @@ export default function App() {
             body: JSON.stringify({
                 kingdom_id: kingdomId,
                 user_token: tok,
-                user_name: (name || getIdentity().name).trim(),
+                user_name: userName,
             }),
         });
         if (r.ok) {
