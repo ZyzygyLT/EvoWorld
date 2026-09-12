@@ -398,7 +398,6 @@ export default function App() {
                 />
             </div>
             <WorldBar tick={tick} lang={lang} historyRef={worldPopRef} />
-            <WorldBar tick={tick} lang={lang} historyRef={worldPopRef} />
             {showLogin && (
                 <AuthModal
                     onClose={() => setShowLogin(false)}

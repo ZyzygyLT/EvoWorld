@@ -73,9 +73,11 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
             )}
 
             {/* fallen realms memorial: collapsed kingdoms, greyed out */}
-            {tick.kingdoms.some(k => (k.sites?.length ?? 0) === 0) && (
+            {((tick.fallen ?? []).length > 0 || tick.kingdoms.some(k => (k.sites?.length ?? 0) === 0)) && (
                 <div style={{ fontSize: 10, color: '#6e7681', margin: '2px 0 6px 2px' }}>
-                    🪦 {tick.kingdoms.filter(k => (k.sites?.length ?? 0) === 0).map(k => k.name).join(', ')}
+                    🪦 {(tick.fallen ?? []).length > 0
+                        ? tick.fallen.map(f => f.name).join(', ')
+                        : tick.kingdoms.filter(k => (k.sites?.length ?? 0) === 0).map(k => k.name).join(', ')}
                 </div>
             )}
 
