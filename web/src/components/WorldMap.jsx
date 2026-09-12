@@ -309,8 +309,9 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     }
 
     function fitInhabited(canvas) {
-        // zoom to the bounding box of all known sites (+margin), so the
-        // settled world fills the screen instead of a tiny strip
+        // zoom CLOSE on the inhabited lands so the map fills the screen:
+        // bounding box of all known sites, then 1.8x closer on its center
+        // (a bbox of every site on a developed world is the whole map)
         const pts = [];
         for (const k of state?.kingdoms ?? []) {
             for (const s of k.sites ?? []) pts.push([s.x, s.y]);
@@ -328,11 +329,13 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         x0 = Math.max(0, x0 - M); y0 = Math.max(0, y0 - M);
         x1 = Math.min(W - 1, x1 + M); y1 = Math.min(H - 1, y1 + M);
         const bw = Math.max(8, x1 - x0 + 1), bh = Math.max(8, y1 - y0 + 1);
-        const scale = Math.min(canvas.width / bw, canvas.height / bh, 24);
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        const scale = Math.min(canvas.width / bw, canvas.height / bh, 24) * 1.8;
+        const s2 = Math.min(scale, 24);
         return {
-            scale,
-            x: (canvas.width - bw * scale) / 2 - x0 * scale,
-            y: (canvas.height - bh * scale) / 2 - y0 * scale,
+            scale: s2,
+            x: canvas.width / 2 - cx * s2,
+            y: canvas.height / 2 - cy * s2,
         };
     }
 

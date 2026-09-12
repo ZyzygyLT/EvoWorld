@@ -182,13 +182,21 @@ class SimEngine:
     def _spawn_kingdoms(self, n_civilized: int, n_tribal: int) -> None:
         # Stone Age: EVERYONE starts tribal (Chiefdom). Civilized governments
         # unlock through tech eras — no Democracies at year zero.
+        # Races are dealt without replacement (shuffled cycle) so neighbors
+        # are always distinct: with 2 civ slots you never get Dwarf+Dwarf.
+        civ_races = [r for r in self.races if r.form == "civilized"]
+        order = self.rng.permutation(len(civ_races)).tolist() if civ_races else []
         for i in range(n_civilized):
-            civ_races = [r for r in self.races if r.form == "civilized"]
-            race = self.rng.choice(civ_races)
+            if not civ_races:
+                break
+            race = civ_races[order[i % len(order)]]
             self._found_kingdom(race, TRIBAL_GOVERNMENT, f"#{i + 1}")
+        tribal_races = [r for r in self.races if r.form == "tribal"]
+        torder = self.rng.permutation(len(tribal_races)).tolist() if tribal_races else []
         for i in range(n_tribal):
-            tribal_races = [r for r in self.races if r.form == "tribal"]
-            race = self.rng.choice(tribal_races)
+            if not tribal_races:
+                break
+            race = tribal_races[torder[i % len(torder)]]
             self._found_kingdom(race, TRIBAL_GOVERNMENT, f"#{i + 1}")
 
     def _found_kingdom(self, race: Race, gov, tag: str) -> Kingdom | None:
