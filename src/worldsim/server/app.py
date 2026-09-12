@@ -389,10 +389,10 @@ def _tick_payload(eng: SimEngine) -> dict:
                 "name": k.name,
                 "race": k.race.name,
                 "government": k.government.name,
-                "population": k.total_population,
+                "population": int(k.total_population),
                 "sites": [
                     {"name": s.name, "x": s.x, "y": s.y,
-                     "population": s.population, "is_capital": s.is_capital}
+                     "population": int(s.population), "is_capital": s.is_capital}
                     for s in k.sites
                 ],
                 "leader": (
@@ -409,7 +409,7 @@ def _tick_payload(eng: SimEngine) -> dict:
                 ),
                 "at_war": k.at_war,
                 "color": list(k.color),
-                "population_history": k.population_history,
+                "population_history": [int(p) for p in k.population_history],
                 "tech_level": k.tech_level,
                 "golden_age": k.golden_age_until > eng.month,
             }

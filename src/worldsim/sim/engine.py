@@ -65,7 +65,7 @@ ERA_POPCAP_BONUS = 0.25  # +25% site popcap per era (urbanization)
 ERA_ARMY_BONUS = 0.15  # +15% military power per era
 ERA_INFLUENCE_RADIUS = 4  # base claim radius at Stone Age ...
 ERA_INFLUENCE_PER_LEVEL = 2  # ... +2 tiles per era
-TECH_BASE_YEARS_PER_ERA = 90  # rough years to advance at tech_bonus 0
+TECH_BASE_YEARS_PER_ERA = 90  # legacy constant (see _progress_tech formula)
 TECH_GOLDEN_AGE_YEARS = 25  # golden age duration
 TECH_GOLDEN_AGE_CHANCE = 0.0015  # monthly chance while prosperous
 PLAGUE_MIN_DENSITY_POP = 8000  # plagues only strike dense realms
@@ -74,6 +74,20 @@ PLAGUE_MORTALITY = (0.10, 0.30)
 COLONY_FOUNDED_MIN_SITES = 12  # saturated-ish realms found colonies
 COLONY_DISTANCE = (15, 30)
 COLONY_INDEPENCE_DISTANCE = 45  # colonies this far declare peaceful independence
+
+# government availability by era: no Democracies at year zero.
+# Every realm starts Tribal; institutions unlock as knowledge advances.
+GOV_MIN_ERA = {
+    "Tribal": 0,
+    "Absolute Monarchy": 1,
+    "Theocracy": 1,
+    "Military Dictatorship": 1,
+    "Constitutional monarchy": 2,
+    "Plutocracy": 2,
+    "Fanatic Theocracy": 2,
+    "Democracy": 3,
+    "Technocracy": 4,
+}
 
 
 def manhattan(ax: int, ay: int, bx: int, by: int) -> int:
@@ -146,11 +160,12 @@ class SimEngine:
         return list(zip(xs.tolist(), ys.tolist(), strict=True))
 
     def _spawn_kingdoms(self, n_civilized: int, n_tribal: int) -> None:
+        # Stone Age: EVERYONE starts tribal (Chiefdom). Civilized governments
+        # unlock through tech eras — no Democracies at year zero.
         for i in range(n_civilized):
             civ_races = [r for r in self.races if r.form == "civilized"]
             race = self.rng.choice(civ_races)
-            gov = self.governments[int(self.rng.integers(0, len(self.governments)))]
-            self._found_kingdom(race, gov, f"#{i + 1}")
+            self._found_kingdom(race, TRIBAL_GOVERNMENT, f"#{i + 1}")
         for i in range(n_tribal):
             tribal_races = [r for r in self.races if r.form == "tribal"]
             race = self.rng.choice(tribal_races)
@@ -177,6 +192,8 @@ class SimEngine:
         self._crown_leader(k)
         self.kingdoms.append(k)
         self._occupancy[y, x] = k.id + 1
+        # totals must be valid from month 0 (fresh paused worlds show real pops)
+        k.total_population = sum(s.population for s in k.sites)
         self.chronicle.log(
             self.month,
             EventType.KINGDOM_FOUNDED,
@@ -204,7 +221,7 @@ class SimEngine:
             category=category,
             popcap=math.floor(popcap),
             is_capital=is_capital,
-            population=20,
+            population=float(self.rng.integers(10, 21)),  # primitive start: 10-20 souls
         )
 
     def _spawn_beasts(self, n_beasts: int) -> None:
@@ -240,7 +257,7 @@ class SimEngine:
     # -- leaders & heroes -------------------------------------------------------
 
     def _crown_leader(self, k: Kingdom) -> None:
-        title = "Chief" if k.race.form == "tribal" else "King"
+        title = "King" if k.government is not TRIBAL_GOVERNMENT else "Chief"
         reign = max(
             LEADER_REIGN_MIN,
             float(self.rng.normal(LEADER_REIGN_MEAN, LEADER_REIGN_STD)),
@@ -479,19 +496,22 @@ class SimEngine:
         if not k.at_war and k.war_exhaustion > 0:
             k.war_exhaustion = max(0, k.war_exhaustion - 1)  # heal in peace
         for site in k.sites:
-            # original: NewPop = int(round(Pop * Repro / 1500)); halve above half popcap
-            growth = site.population * repro / 1500
+            # slow ancient growth (~2%/month at repro 100 compounded, quartered
+            # above half popcap). Population is float: fractional growth
+            # accumulates instead of truncating to zero (which would freeze
+            # small villages forever).
+            growth = site.population * repro / 5000
             if site.population > site.popcap / 2:
-                growth /= 6  # overcrowding slows growth
-            site.population = int(site.population + round(growth))
+                growth /= 4  # overcrowding slows growth
+            site.population = site.population + growth
             site.update_category()
 
             # original clamps to popcap FIRST (unconditionally), then halves
             # and founds a new site only if below MAX_SITES
             if site.population > site.popcap:
-                site.population = int(site.popcap)
+                site.population = site.popcap
                 if len(k.sites) < MAX_SITES:
-                    site.population = int(site.popcap / 2)
+                    site.population = site.popcap / 2
                     self._expand(k, site)
 
             k.total_population += site.population
@@ -913,22 +933,27 @@ class SimEngine:
             self._maybe_colony(k)
 
     def _progress_tech(self, k: Kingdom) -> None:
-        """Yearly tech progress; eras advance and transform the realm."""
+        """Yearly tech progress; eras advance and transform the realm.
+
+        Paced for a very ancient feel: Stone Age lasts ~150 years, with
+        knowledge compounding slightly each era (later eras arrive faster).
+        """
         if self.month % 12 != 0:
             return
-        # progress: prosperity + government tech bonus + a base rate
-        prosper = sum(s.popcap for s in k.sites) / max(1, len(k.sites))
-        yearly = (0.006 + prosper / 30_000 + k.government.tech_bonus / 3_000) / max(
-            1, TECH_BASE_YEARS_PER_ERA / 100
+        # progress: tile prosperity (0..1) + government tech bonus, compounding
+        prosper = sum(self.world.prosperity[s.y, s.x] for s in k.sites) / max(
+            1, len(k.sites)
         )
-        k.tech_progress += yearly * 100 / 100
+        yearly = (0.004 + 0.004 * prosper + max(0, k.government.tech_bonus) * 0.0002)
+        yearly *= 1 + 0.12 * k.tech_level
+        k.tech_progress += yearly
         if k.tech_progress >= 1.0 and k.tech_level < len(ERA_NAMES) - 1:
             k.tech_progress = 0.0
             k.tech_level += 1
             era = ERA_NAMES[k.tech_level]
             # urbanization: existing settlements can now sustain more people
             mult = self._era_popcap_mult(k)
-            base_mult = 1.0 + ERA_POPCAP_BONUS * (k.tech_level - 1)
+            base_mult = 0.7 + ERA_POPCAP_BONUS * (k.tech_level - 1)
             for s in k.sites:
                 s.popcap = math.floor(s.popcap * mult / base_mult)
             self.chronicle.log(
@@ -937,12 +962,13 @@ class SimEngine:
                 f"{k.name} entered the {era}.",
                 (k.id,),
             )
-            # tribes entering the Iron Age become civilizations
-            if k.tech_level >= 2 and k.race.form == "tribal" and not k.civilized:
+            # tribes entering the Iron Age become civilizations — and so does
+            # any realm still under a Tribal council: the Iron Age invents
+            # the state itself
+            if k.tech_level >= 2 and k.government is TRIBAL_GOVERNMENT:
                 k.civilized = True
-                gov = self.governments[
-                    int(self.rng.integers(0, len(self.governments)))
-                ]
+                allowed = self._allowed_governments(k, exclude_tribal=True)
+                gov = allowed[int(self.rng.integers(0, len(allowed)))] if allowed else k.government
                 old = k.government.name
                 k.government = gov
                 k.last_gov_shift_month = self.month
@@ -960,7 +986,8 @@ class SimEngine:
                 s.popcap = math.floor(s.popcap * 1.01)
 
     def _era_popcap_mult(self, k: Kingdom) -> float:
-        mult = 1.0 + ERA_POPCAP_BONUS * k.tech_level
+        # primitive agriculture sustains less (Stone x0.7); each era adds 25%
+        mult = 0.7 + ERA_POPCAP_BONUS * k.tech_level
         if k.golden_age_until > self.month:
             mult *= 1.5
         return mult
@@ -1065,16 +1092,32 @@ class SimEngine:
 
     # -- government evolution (GDD §4) -----------------------------------------
 
+    def _allowed_governments(self, k: Kingdom, exclude_tribal: bool = True) -> list:
+        """Governments this realm may adopt at its current tech level."""
+        out = []
+        for g in self.governments:
+            if g is TRIBAL_GOVERNMENT:
+                continue
+            if GOV_MIN_ERA.get(g.name, 0) > k.tech_level:
+                continue
+            out.append(g)
+        if not exclude_tribal:
+            out.append(TRIBAL_GOVERNMENT)
+        return out
+
     def _maybe_shift_government(self, k: Kingdom) -> None:
-        if k.race.form == "tribal" or not k.sites:
+        # Stone-Age tribes under a council don't shift institutions yet
+        if k.government is TRIBAL_GOVERNMENT and k.tech_level < 2:
+            return
+        if not k.sites:
             return
         if k.years_since_founding < GOV_SHIFT_MIN_YEARS:
             return
         if self.month % 12 != 0:  # evaluate yearly
             return
-        civ_govs = [g for g in self.governments if g is not TRIBAL_GOVERNMENT]
+        civ_govs = self._allowed_governments(k)
 
-        # prolonged losing war -> military dictatorship (always allowed: survival)
+        # prolonged losing war -> military dictatorship (survival, Bronze+)
         losing_war = any(
             not w.is_over
             and k in (w.side_a, w.side_b)
@@ -1085,10 +1128,17 @@ class SimEngine:
             )
             for w in self.wars
         )
-        if losing_war and k.government.name != "Military Dictatorship":
-            new_gov = next(g for g in civ_govs if g.name == "Military Dictatorship")
-            self._change_government(k, new_gov, "amid a losing war")
-            return
+        if (
+            losing_war
+            and k.government.name != "Military Dictatorship"
+            and k.tech_level >= 1
+        ):
+            new_gov = next(
+                (g for g in civ_govs if g.name == "Military Dictatorship"), None
+            )
+            if new_gov is not None:
+                self._change_government(k, new_gov, "amid a losing war")
+                return
 
         # cooldown: no flip-flopping between golden-age shifts
         if self.month - k.last_gov_shift_month >= GOV_SHIFT_COOLDOWN_YEARS * 12:
@@ -1102,31 +1152,47 @@ class SimEngine:
             if won_war or k.war_exhaustion == 0:
                 new_gov = next(
                     (g for g in civ_govs if g.name == "Absolute Monarchy"),
-                    civ_govs[0],
+                    None,
                 )
+                if new_gov is None:
+                    # Stone Age has no monarchies: dissolve back into a council
+                    new_gov = TRIBAL_GOVERNMENT
                 self._change_government(
                     k, new_gov, "as the wartime junta ceded power"
                 )
 
     def _golden_age_or_peace_shifts(self, k: Kingdom, civ_govs: list) -> None:
-        """Golden-age democratization and long-peace constitutional shifts."""
-        # high prosperity + size + peace -> democracy / technocracy
+        """Golden-age modernization and long-peace constitutional shifts.
+
+        Options always come from the era-allowed set: a Bronze-Age golden
+        age crowns kings and priests, not democrats.
+        """
+        # high prosperity + size + peace -> the most advanced allowed form
         prosperous = sum(s.popcap for s in k.sites) > 800 and not k.at_war
-        if prosperous and k.government.name not in (
-            "Democracy",
-            "Technocracy",
-            "Military Dictatorship",
-        ):
-            options = [g for g in civ_govs if g.name in ("Democracy", "Technocracy")]
+        if prosperous and k.government not in civ_govs:
+            # prefer high-tech governments when the era allows them
+            for want in ("Technocracy", "Democracy", "Constitutional monarchy",
+                         "Plutocracy", "Fanatic Theocracy", "Theocracy",
+                         "Absolute Monarchy", "Military Dictatorship"):
+                options = [g for g in civ_govs if g.name == want]
+                if options:
+                    break
+            else:
+                options = [g for g in civ_govs if g is not k.government] or civ_govs
+            if not options:
+                return
             choice = options[int(self.rng.integers(0, len(options)))]
             self._change_government(k, choice, "in a golden age")
             return
-        # stagnant authoritarian regime under long peace -> constitutional monarchy
+        # stagnant absolute monarchy under long peace -> constitutional monarchy
         long_peace = not k.at_war and k.war_exhaustion == 0 and self.month > 24 * 12
         is_absolute_monarchy = k.government.name == "Absolute Monarchy"
         if long_peace and is_absolute_monarchy:
-            new_gov = next(g for g in civ_govs if g.name == "Constitutional monarchy")
-            self._change_government(k, new_gov, "after decades of peace")
+            new_gov = next(
+                (g for g in civ_govs if g.name == "Constitutional monarchy"), None
+            )
+            if new_gov is not None:
+                self._change_government(k, new_gov, "after decades of peace")
 
     def _change_government(self, k: Kingdom, new_gov, reason: str) -> None:
         old = k.government.name

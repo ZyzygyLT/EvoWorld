@@ -209,7 +209,7 @@ def draw_sidebar(console: tcod.console.Console, engine: SimEngine) -> None:
             break
         color = tuple(k.color)
         mark = "!" if k.at_war else " "
-        line = f"{mark}{k.name[:18]:<18} pop={k.total_population:>6} {len(k.sites)}s"
+        line = f"{mark}{k.name[:18]:<18} pop={int(k.total_population):>6} {len(k.sites)}s"
         console.print(x0, y, line, fg=color)
         y += 1
         spark = _sparkline(k.population_history, SIDEBAR_W - 6)

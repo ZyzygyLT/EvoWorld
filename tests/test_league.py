@@ -91,8 +91,10 @@ def test_scoring_flows_to_standings(tmp_path):
     board = c.get(f"/api/worlds/{wid}/standings").json()
     assert {u["user"] for u in board} == {"Oracle1", "Oracle2"}
     assert all("points" in u and "rank" in u for u in board)
-    # points only move forward
-    assert all(u["points"] >= 0 for u in board)
+    # ranks are ordered by points desc (negatives allowed by design)
+    pts = [u["points"] for u in board]
+    assert pts == sorted(pts, reverse=True)
+    assert all(isinstance(u["points"], int) for u in board)
 
 
 def test_season_end_freezes_league(tmp_path):

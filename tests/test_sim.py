@@ -13,8 +13,16 @@ def test_initial_setup(engine):
     for k in engine.kingdoms:
         assert len(k.sites) == 1
         assert k.sites[0].is_capital
-        assert k.sites[0].population == 20
+        # primitive start: 10-20 souls, all under a Tribal council
+        assert 10 <= k.sites[0].population <= 20
+        assert k.government.name == "Tribal"
+        assert not k.civilized
+        assert k.tech_level == 0  # Stone Age
         assert k.leader is not None  # crowned at founding
+        assert k.leader.title == "Chief"
+    # totals are valid from month 0 (fresh paused worlds show real pops)
+    for k in engine.kingdoms:
+        assert k.total_population == sum(s.population for s in k.sites)
 
 
 def test_mutable_state_not_shared(engine):
@@ -31,17 +39,20 @@ def test_tick_advances_time(engine):
 
 
 def test_population_grows(engine):
-    for _ in range(24):
+    before = [k.total_population for k in engine.kingdoms]
+    for _ in range(120):  # 10 years of slow ancient growth
         engine.tick()
-    for k in engine.kingdoms:
-        assert k.total_population > 20
+    for k, b in zip(engine.kingdoms, before, strict=True):
+        assert k.total_population > b
 
 
 def test_expansion_creates_sites(engine):
-    for _ in range(240):
+    for _ in range(600):  # ~50y: first expansion lands ~year 22-30
         engine.tick()
+        if any(len(k.sites) > 1 for k in engine.kingdoms):
+            break
     expanded = [k for k in engine.kingdoms if len(k.sites) > 1]
-    assert expanded, "expected at least one kingdom to expand in 20 years"
+    assert expanded, "expected at least one kingdom to expand within ~50 years"
 
 
 def test_chronicle_records_foundings(engine):

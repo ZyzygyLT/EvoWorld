@@ -29,7 +29,7 @@ def engine_to_dict(engine: SimEngine) -> dict:
                 "race": k.race.name,
                 "government": k.government.name,
                 "color": list(k.color),
-                "population": k.total_population,
+                "population": int(k.total_population),
                 "at_war": k.at_war,
                 "sites": [
                     {
@@ -37,7 +37,7 @@ def engine_to_dict(engine: SimEngine) -> dict:
                         "x": s.x,
                         "y": s.y,
                         "category": s.category,
-                        "population": s.population,
+                        "population": int(s.population),
                         "is_capital": s.is_capital,
                     }
                     for s in k.sites
@@ -63,7 +63,7 @@ def engine_to_dict(engine: SimEngine) -> dict:
                     if k.hero
                     else None
                 ),
-                "population_history": k.population_history,
+                "population_history": [int(p) for p in k.population_history],
                 "tech_level": k.tech_level,
                 "golden_age": k.golden_age_until > engine.month,
                 "territory": (engine.territory_map() == k.id).astype(int).tolist(),

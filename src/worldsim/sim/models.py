@@ -58,7 +58,7 @@ class Site:
     y: int
     name: str
     category: str = "Village"  # Village | Town | City (by popcap)
-    population: int = 20
+    population: float = 20.0  # float internally (fractional growth accumulates)
     popcap: float = 0.0
     is_capital: bool = False
 
