@@ -1,4 +1,9 @@
-"""Smoke test of the FastAPI server (REST + WebSocket) via TestClient."""
+"""Smoke test of the FastAPI server (REST + WebSocket) via TestClient.
+
+The WS is a SHARED CLOCK (WorldRunner): pushes happen on the runner's own
+asyncio task, so under the sync TestClient we assert on the immediate
+snapshot handshake, not on autonomous ticking.
+"""
 
 from __future__ import annotations
 
@@ -7,18 +12,27 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import worldsim.server.app as appmod
+import worldsim.server.runner as runnermod
 
 
 def _fresh_app(monkeypatch, tmp_path: Path):
-    """Isolated app instance with its own DB file per test."""
+    """Isolated app instance with its own DB + runner registry per test."""
     db_file = tmp_path / "test_worlds.db"
 
-    # rebuild the module-level engine/session against a temp DB
-    appmod.engine_db = appmod.create_engine(
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import worldsim.server.prediction_resolver as resolver
+
+    test_engine = create_engine(
         f"sqlite:///{db_file}", connect_args={"check_same_thread": False}
     )
-    appmod.SessionLocal = appmod.sessionmaker(bind=appmod.engine_db)
-    appmod.Base.metadata.create_all(appmod.engine_db)
+    session = sessionmaker(bind=test_engine)
+    appmod.SessionLocal = session
+    resolver.SessionLocal = session
+    runnermod.registry = runnermod.RunnerRegistry()
+    appmod.registry = runnermod.registry
+    appmod.Base.metadata.create_all(test_engine)
     return TestClient(appmod.app)
 
 
@@ -53,29 +67,33 @@ def test_server_rest(tmp_path, monkeypatch):
     assert len(r.json()) == 0
 
 
-def test_server_ws_stream(tmp_path, monkeypatch):
+def test_server_ws_snapshot_handshake(tmp_path, monkeypatch):
+    """Connecting yields an immediate tick snapshot of the shared engine."""
     c = _fresh_app(monkeypatch, tmp_path)
-
-    r = c.post("/api/worlds", json={"seed": 7, "width": 80, "height": 50, "months": 0})
+    r = c.post("/api/worlds", json={"seed": 7, "width": 80, "height": 50, "months": 12})
     wid = r.json()["id"]
 
-    months = []
     with c.websocket_connect(f"/api/ws/{wid}") as ws:
-        for i in range(3):
-            data = ws.receive_json()
-            assert data["type"] == "tick"
-            assert len(data["kingdoms"]) == 4
-            # leader payload carries reign data now
-            for k in data["kingdoms"]:
-                if k["leader"]:
-                    assert "reign_years" in k["leader"]
-                    assert "battles_won" in k["leader"]
-            months.append(data["month"])
-            if i == 0:
-                ws.send_json({"speed": 2})
-    # months must advance (speed=2 applied after first push)
-    assert months[1] > months[0]
-    assert months[2] - months[1] == 2
+        data = ws.receive_json()
+        assert data["type"] == "tick"
+        # shared runner fast-forwarded to the saved month on first attach
+        assert data["month"] >= 12
+        assert len(data["kingdoms"]) == 4
+        for k in data["kingdoms"]:
+            if k["leader"]:
+                assert "reign_years" in k["leader"]
+                assert "battles_won" in k["leader"]
+        # control messages are accepted; runner state mutates once the
+        # endpoint's receive loop processes them (TestClient runs the loop
+        # between send and assert, so give it a moment via another receive)
+        ws.send_json({"speed": 4})
+        runner = runnermod.registry.get_existing(wid)
+        ws.send_json({"pause": True})  # pause=True (the shared default)
+        # trigger loop iterations: the endpoint drains pending messages on
+        # its next receive cycle; send one more control to be safe
+        ws.send_json({"speed": 4})
+        assert runner.speed == 4
+        assert runner.paused is True  # shared clock starts (and stays) paused
 
 
 def test_server_meta(tmp_path, monkeypatch):
@@ -91,6 +109,9 @@ def test_server_meta(tmp_path, monkeypatch):
     assert "elected" in demo["description"]  # real description text
     race_names = [r["name"] for r in meta["races"]]
     assert "Dwarf" in race_names and "Giant" in race_names
+    # multiplayer: prediction kinds exposed for the UI
+    assert "prediction_kinds" in meta
+    assert "era_reach" in meta["prediction_kinds"]
 
 
 def test_kingdom_stats_endpoint(tmp_path, monkeypatch):
@@ -117,6 +138,7 @@ def test_kingdom_stats_endpoint(tmp_path, monkeypatch):
 
 
 def test_ws_selected_stats_stream(tmp_path, monkeypatch):
+    """Selecting a kingdom streams its rich stats back on that socket."""
     c = _fresh_app(monkeypatch, tmp_path)
     r = c.post("/api/worlds", json={"seed": 7, "width": 80, "height": 50, "months": 0})
     wid = r.json()["id"]
@@ -124,8 +146,8 @@ def test_ws_selected_stats_stream(tmp_path, monkeypatch):
     with c.websocket_connect(f"/api/ws/{wid}") as ws:
         data = ws.receive_json()
         assert data["selected_stats"] is None  # nothing selected yet
-        ws.send_json({"selected": 0, "speed": 1})
-        data2 = ws.receive_json()
+        ws.send_json({"selected": 0})
+        data2 = ws.receive_json()  # immediate snapshot on selection
         assert data2["selected_stats"] is not None
         assert data2["selected_stats"]["id"] == 0
         assert "military_power" in data2["selected_stats"]

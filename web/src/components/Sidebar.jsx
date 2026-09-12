@@ -1,9 +1,11 @@
 import React from 'react';
+import RoomPanel from './RoomPanel.jsx';
 
 /** Right sidebar: kingdoms list, ongoing wars, chronicle feed with filters.
  * (Per-kingdom stats live in the floating StatsPanel over the map.) */
-export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect }) {
+export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect, worldId }) {
     const [showKingdoms, setShowKingdoms] = React.useState(true);
+    const [showRoom, setShowRoom] = React.useState(false);
     if (!tick) return <aside style={aside}>waiting for simulation…</aside>;
     const kStyle = (k) => ({ color: `rgb(${k.color[0]},${k.color[1]},${k.color[2]})` });
 
@@ -83,6 +85,17 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
 
             {/* chronicle: guaranteed space + internal scroll + auto-scroll */}
             <ChronicleFeed events={tick.events} />
+
+            {/* multiplayer room (prophecies + chat + ranks), collapsible */}
+            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                <button
+                    style={{ ...btn, fontSize: 11, flex: 1 }}
+                    onClick={() => setShowRoom(s => !s)}
+                >{showRoom ? '▾ room' : '▸ room (multiplayer)'}</button>
+            </div>
+            {showRoom && (
+                <RoomPanel worldId={worldId} month={tick.month} meta={meta} />
+            )}
         </aside>
     );
 }

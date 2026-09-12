@@ -17,7 +17,16 @@ export default function App() {
     const [busy, setBusy] = useState(false);
     const [selected, setSelected] = useState(null);
     const [mapMode, setMapMode] = useState('biome');
+    const [worldId, setWorldId] = useState(null);
+    const [toasts, setToasts] = useState([]);
     const wsRef = useRef(null);
+
+    // toasts fade after 6 seconds
+    useEffect(() => {
+        if (!toasts.length) return;
+        const t = setTimeout(() => setToasts(ts => ts.slice(1)), 6000);
+        return () => clearTimeout(t);
+    }, [toasts]);
 
     // live rich stats for the selected kingdom (streamed by the server)
     const stats = tick?.selected_stats ?? null;
@@ -37,11 +46,19 @@ export default function App() {
         if (wsRef.current) wsRef.current.close();
         fetch(`/api/worlds/${id}`).then(r => r.json()).then(s => {
             setState(s);
+            setWorldId(id);
             setPaused(true);   // every opened world starts paused
             setSpeed(1);
             setSelected(null);
             const ws = new WebSocket(`ws://${location.host}/api/ws/${id}`);
-            ws.onmessage = (m) => setTick(JSON.parse(m.data));
+            ws.onmessage = (m) => {
+                const data = JSON.parse(m.data);
+                if (data.type === 'system') {
+                    setToasts(t => [...t.slice(-3), { id: Date.now() + Math.random(), text: data.text }]);
+                } else if (data.type === 'tick') {
+                    setTick(data);
+                }
+            };
             ws.onopen = () => ws.send(JSON.stringify({ speed: 1, pause: true }));
             wsRef.current = ws;
         });
@@ -66,7 +83,7 @@ export default function App() {
             body: JSON.stringify({ seed: Math.floor(Math.random() * 99999), months: 0 }),
         })
             .then(r => r.json())
-            .then(d => { setBusy(false); setState(d.state); openStream(d.id); refreshList(); });
+            .then(d => { setBusy(false); setState(d.state); setWorldId(d.id); openStream(d.id); refreshList(); });
     };
 
     return (
@@ -91,7 +108,7 @@ export default function App() {
                     </button>
                 ))}
             </header>
-            <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative' }}>
                 <WorldMap
                     state={state}
                     tick={tick}
@@ -103,6 +120,19 @@ export default function App() {
                     govDesc={govDesc}
                     onClearSelection={() => setSelected(null)}
                 />
+                {/* system toasts (prophecy resolutions, chat) */}
+                <div style={{ position: 'absolute', top: 40, right: 360, zIndex: 20, display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 340 }}>
+                    {toasts.map(t => (
+                        <div key={t.id} style={{
+                            background: 'rgba(22,27,34,0.95)',
+                            border: '1px solid #f0c674',
+                            borderRadius: 6,
+                            padding: '6px 10px',
+                            fontSize: 12,
+                            color: '#f0c674',
+                        }}>{t.text}</div>
+                    ))}
+                </div>
                 <Sidebar
                     tick={tick}
                     meta={meta}
@@ -112,6 +142,7 @@ export default function App() {
                     onSpeed={s => setSpeed(s)}
                     selected={selected}
                     onSelect={setSelected}
+                    worldId={worldId}
                 />
             </div>
         </div>
