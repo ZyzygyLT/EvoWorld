@@ -107,3 +107,6 @@ def ensure_schema() -> None:
             if col.name not in existing and col.name != "id":
                 default = f" DEFAULT {col.server_default.arg}" if col.server_default else ""
                 conn.execute(text(f"ALTER TABLE worlds ADD COLUMN {col.name} {col.type}{default}"))
+
+
+ensure_schema()  # migrate old dev DBs in place (ADD COLUMN is idempotent-safe)
