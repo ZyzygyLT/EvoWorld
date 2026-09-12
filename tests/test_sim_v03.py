@@ -38,10 +38,10 @@ def test_tech_eras_advance(small_world, races, governments):
     e = SimEngine(small_world, races, governments, seed=42)
     for k in e.kingdoms:
         assert k.tech_level == 0  # world starts in the Stone Age
-    for _ in range(3000):  # 250y
+    for _ in range(4200):  # 350y (tech tree: root + Bronze node take ~200-300y)
         e.tick()
     eras = [k.tech_level for k in e.kingdoms]
-    assert any(t >= 1 for t in eras), f"no realm left the Stone Age in 250y: {eras}"
+    assert any(t >= 1 for t in eras), f"no realm left the Stone Age in 350y: {eras}"
     # chronicle records era transitions
     tech_events = [ev for ev in e.chronicle.events if ev.type == EventType.TECH_ERA]
     assert tech_events
@@ -52,7 +52,7 @@ def test_tech_eras_advance(small_world, races, governments):
 def test_tribes_civilize(small_world, races, governments):
     """Tribes reaching the Iron Age adopt a real government."""
     e = SimEngine(small_world, races, governments, seed=42)
-    for _ in range(4000):  # ~333y
+    for _ in range(7200):  # ~600y (Iron needs root+Bronze+Iron nodes)
         e.tick()
     civ_tribes = [
         k for k in e.kingdoms

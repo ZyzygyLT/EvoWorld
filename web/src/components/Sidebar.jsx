@@ -4,7 +4,7 @@ import { renderEvent, t, vocab } from '../i18n.js';
 
 /** Right sidebar: kingdoms list, ongoing wars, chronicle feed with filters.
  * (Per-kingdom stats live in the floating StatsPanel over the map.) */
-export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect, worldId, worldMode, claims, standings, onClaim, lang = 'es' }) {
+export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect, worldId, worldMode, claims, standings, onClaim, lang = 'es', followId = null, onFollow }) {
     const [showKingdoms, setShowKingdoms] = React.useState(true);
     const [showRoom, setShowRoom] = React.useState(false);
     if (!tick) return <aside style={aside}>waiting for simulation…</aside>;
@@ -38,7 +38,7 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
             </div>
             {showKingdoms && (
                 <div style={{ maxHeight: 260, overflowY: 'auto', marginBottom: 6 }}>
-                    {tick.kingdoms.map(k => (
+                    {tick.kingdoms.filter(k => (k.sites?.length ?? 0) > 0).map(k => (
                         <div
                             key={k.id}
                             onClick={() => onSelect(k)}
@@ -46,6 +46,12 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                         >
                             <div style={kStyle(k)}>
                                 {k.at_war ? '⚔ ' : ''}{k.name}
+                                <button
+                                    title={followId === k.id ? 'stop following' : 'follow capital'}
+                                    onClick={(e) => { e.stopPropagation(); onFollow && onFollow(followId === k.id ? null : k.id); }}
+                                    style={{ ...btn, fontSize: 10, padding: '0 5px', marginLeft: 6,
+                                             background: followId === k.id ? '#2f81f7' : btn.background }}
+                                >◎</button>
                             </div>
                             <div style={{ fontSize: 11, color: '#8b949e' }}>
                                 {vocab(lang, k.race)} · {vocab(lang, k.government)}{k.golden_age ? ' ✨' : ''}
@@ -63,6 +69,13 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                             )}
                         </div>
                     ))}
+                </div>
+            )}
+
+            {/* fallen realms memorial: collapsed kingdoms, greyed out */}
+            {tick.kingdoms.some(k => (k.sites?.length ?? 0) === 0) && (
+                <div style={{ fontSize: 10, color: '#6e7681', margin: '2px 0 6px 2px' }}>
+                    🪦 {tick.kingdoms.filter(k => (k.sites?.length ?? 0) === 0).map(k => k.name).join(', ')}
                 </div>
             )}
 

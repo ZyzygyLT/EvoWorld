@@ -7,7 +7,7 @@ import StatsPanel from './StatsPanel.jsx';
  * Canvas world map with pan/zoom + political overlay + site markers.
  * Re-fits the camera on every world load; survives canvas resizes.
  */
-export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection, claims = [], worldMode = 'single', onClaim, lang = 'es', canvasRef: externalRef }) {
+export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection, claims = [], worldMode = 'single', onClaim, lang = 'es', canvasRef: externalRef, followId = null, onFollowClear }) {
     const canvasRef = useRef(null);
     // expose the canvas for PNG export
     useEffect(() => {
@@ -378,12 +378,26 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
 
     useEffect(() => { draw(); }, [tick, draw]);
 
-    // "F" re-fits the camera to the whole map
+    // follow-cam: keep the followed kingdom's capital centered while it lives
+    useEffect(() => {
+        if (followId == null || !tick) return;
+        const k = tick.kingdoms?.find(k => k.id === followId);
+        const cap = k?.sites?.find(s => s.is_capital) ?? k?.sites?.[0];
+        const canvas = canvasRef.current;
+        if (!cap || !canvas || !viewRef.current) return;
+        viewRef.current.x = canvas.width / 2 - (cap.x + 0.5) * viewRef.current.scale;
+        viewRef.current.y = canvas.height / 2 - (cap.y + 0.5) * viewRef.current.scale;
+        clampView(canvas, viewRef.current);
+        draw();
+    }, [tick, followId, draw]);
+
+    // "F" re-fits the camera to the whole map (and breaks follow-cam)
     useEffect(() => {
         const onKey = (e) => {
             if (e.key === 'f' || e.key === 'F') {
                 const canvas = canvasRef.current;
                 if (canvas && W) {
+                    if (onFollowClear) onFollowClear();
                     viewRef.current = fitView(canvas);
                     draw();
                 }
@@ -425,9 +439,11 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     };
     const onMove = (e) => {
         if (dragRef.current) {
-            const canvas = canvasRef.current;
             const d = dragRef.current;
-            if (Math.abs(e.clientX - d.px) + Math.abs(e.clientY - d.py) > 3) d.moved = true;
+            if (Math.abs(e.clientX - d.px) + Math.abs(e.clientY - d.py) > 3) {
+                d.moved = true;
+                if (onFollowClear) onFollowClear();  // manual pan breaks follow-cam
+            }
             viewRef.current.x = d.vx + (e.clientX - d.px);
             viewRef.current.y = d.vy + (e.clientY - d.py);
             clampView(canvas, viewRef.current);

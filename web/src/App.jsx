@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import WorldMap from './components/WorldMap.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import StartScreen from './components/StartScreen.jsx';
+import WorldBar from './components/WorldBar.jsx';
 import { DEFAULT_LANG, t } from './i18n.js';
 import { ensureIdentity, getIdentity } from './identity.js';
 
@@ -26,6 +27,8 @@ export default function App() {
     const [claims, setClaims] = useState([]);
     const [standings, setStandings] = useState([]);
     const [toasts, setToasts] = useState([]);
+    const [followId, setFollowId] = useState(null);  // kingdom id the camera tracks
+    const worldPopRef = useRef([]);  // [{month, pop}] world-population sparkline
     const [lang, setLang] = useState(() => localStorage.getItem('worldsim_lang') || DEFAULT_LANG);
     const [user, setUser] = useState(null);  // {username, user_id} when logged in
     const [showLogin, setShowLogin] = useState(false);
@@ -126,6 +129,15 @@ export default function App() {
                     setSelectedStats(data.stats);
                 } else if (data.type === 'tick') {
                     setTick(data);
+                    // accumulate world population for the bottom-bar sparkline
+                    const total = (data.kingdoms ?? []).reduce(
+                        (a, k) => a + (k.population || 0), 0);
+                    const hist = worldPopRef.current;
+                    const last = hist[hist.length - 1];
+                    if (!last || last.month !== data.month) {
+                        hist.push({ month: data.month, pop: Math.round(total) });
+                        if (hist.length > 500) hist.splice(0, hist.length - 500);
+                    }
                 }
             };
             ws.onopen = () => ws.send(JSON.stringify({ speed: 1, pause: true }));
@@ -350,6 +362,8 @@ export default function App() {
                     onClaim={doClaim}
                     lang={lang}
                     canvasRef={mapCanvasRef}
+                    followId={followId}
+                    onFollowClear={() => setFollowId(null)}
                 />
                 {/* system toasts (prophecy resolutions, chat) */}
                 <div style={{ position: 'absolute', top: 40, right: 360, zIndex: 20, display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 340 }}>
@@ -379,8 +393,12 @@ export default function App() {
                     standings={standings}
                     onClaim={doClaim}
                     lang={lang}
+                    followId={followId}
+                    onFollow={setFollowId}
                 />
             </div>
+            <WorldBar tick={tick} lang={lang} historyRef={worldPopRef} />
+            <WorldBar tick={tick} lang={lang} historyRef={worldPopRef} />
             {showLogin && (
                 <AuthModal
                     onClose={() => setShowLogin(false)}

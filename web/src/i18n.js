@@ -102,8 +102,7 @@ const REASONS = {
     },
 };
 
-export const VOCAB = {
-    en: {},
+export const VOCAB = {    en: {},
     es: {
         "Tribal": "Tribal",
         "Absolute Monarchy": "Monarquía Absoluta",
@@ -140,6 +139,53 @@ export function vocab(lang, word) {
     if (lang === "en" || word == null) return word ?? "";
     return VOCAB.es[word] ?? word;
 }
+
+export const TECH_NAMES = {
+    ambush: { en: "Ambush Tactics", es: "Tácticas de emboscada" },
+    bronze_arms: { en: "Bronze Working", es: "Trabajo del bronce" },
+    iron_arms: { en: "Iron Working", es: "Forja del hierro" },
+    phalanx: { en: "Phalanx", es: "Falange" },
+    siege: { en: "Siege Craft", es: "Arte del asedio" },
+    steel: { en: "Steel", es: "Acero" },
+    agriculture: { en: "Agriculture", es: "Agricultura" },
+    irrigation: { en: "Irrigation", es: "Irrigación" },
+    pottery: { en: "Pottery", es: "Alfarería" },
+    metalworking: { en: "Metalworking", es: "Metalurgia" },
+    guilds: { en: "Guilds", es: "Gremios" },
+    architecture: { en: "Architecture", es: "Arquitectura" },
+    fishing: { en: "Fishing", es: "Pesca" },
+    coastal_trade: { en: "Coastal Trade", es: "Comercio costero" },
+    currency: { en: "Currency", es: "Moneda" },
+    merchant_fleet: { en: "Merchant Fleet", es: "Flota mercante" },
+    cartography: { en: "Cartography", es: "Cartografía" },
+    oral_tradition: { en: "Oral Tradition", es: "Tradición oral" },
+    writing: { en: "Writing", es: "Escritura" },
+    priesthood: { en: "Priesthood", es: "Sacerdocio" },
+    philosophy: { en: "Philosophy", es: "Filosofía" },
+    engineering: { en: "Engineering", es: "Ingeniería" },
+};
+
+export function techName(lang, id) {
+    return (TECH_NAMES[id] ?? {})[lang] ?? TECH_NAMES[id]?.en ?? id;
+}
+
+export const TECH_BRANCH = {
+    ambush: "warfare", bronze_arms: "warfare", iron_arms: "warfare",
+    phalanx: "warfare", siege: "warfare", steel: "warfare",
+    agriculture: "craft", irrigation: "craft", pottery: "craft",
+    metalworking: "craft", guilds: "craft", architecture: "craft",
+    fishing: "trade", coastal_trade: "trade", currency: "trade",
+    merchant_fleet: "trade", cartography: "trade",
+    oral_tradition: "lore", writing: "lore", priesthood: "lore",
+    philosophy: "lore", engineering: "lore",
+};
+
+export const BRANCH_COLORS = {
+    warfare: "#f85149",
+    craft: "#d29922",
+    trade: "#58a6ff",
+    lore: "#d2a8ff",
+};
 
 export function renderEvent(lang, ev) {
     // ev: {msg_key, params, text} — re-render from key+params, fallback to text

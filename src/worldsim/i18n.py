@@ -55,6 +55,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "milestone_first_empire": "★ {kingdom} became the first realm to hold {n} settlements.",
         "milestone_ten_thousand": "★ {kingdom} became the first realm to reach 10,000 souls.",
         "milestone_century": "★ A full century of recorded history has passed.",
+        "tech_discovery": "★ {kingdom} discovered {tech} before all others.",
     },
     "es": {
         "kingdom_founded": "{kingdom} ({race}, {government}) fundó su capital {site}.",
@@ -101,6 +102,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "asentamientos.",
         "milestone_ten_thousand": "★ {kingdom} fue el primer reino en alcanzar 10.000 almas.",
         "milestone_century": "★ Ha pasado un siglo completo de historia registrada.",
+        "tech_discovery": "★ {kingdom} descubrió {tech} antes que nadie.",
     },
 }
 
@@ -158,6 +160,8 @@ VOCAB: dict[str, dict[str, str]] = {
 
 def render(lang: str, key: str, params: dict | None = None) -> str:
     """Render a message template. Falls back to English, then to the key."""
+    from worldsim.sim.tech import TECH_NAMES
+
     params = dict(params or {})
     # fixed-vocabulary slots are translated too (proper names pass through)
     if lang != "en":
@@ -176,6 +180,9 @@ def render(lang: str, key: str, params: dict | None = None) -> str:
             )
         else:
             params["cause"] = vocab(lang, "border friction")
+    if key == "tech_discovery" and params.get("tech"):
+        tid = params["tech"]
+        params["tech"] = TECH_NAMES.get(tid, {}).get(lang, TECH_NAMES.get(tid, {}).get("en", tid))
     if key == "government_changed":
         reasons = {
             "losing_war": "amid a losing war" if lang != "es" else "en medio de una guerra perdida",

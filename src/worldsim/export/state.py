@@ -67,6 +67,8 @@ def engine_to_dict(engine: SimEngine) -> dict:
                 ),
                 "population_history": [int(p) for p in k.population_history],
                 "tech_level": k.tech_level,
+                "techs": sorted(k.techs),
+                "culture": {axis: round(w, 3) for axis, w in k.culture.items()},
                 "golden_age": k.golden_age_until > engine.month,
                 "founded_month": k.founded_month,
                 "territory": (engine.territory_map() == k.id).astype(int).tolist(),
@@ -93,6 +95,7 @@ def engine_to_dict(engine: SimEngine) -> dict:
             {"name": b.name, "race": b.race.name, "x": b.x, "y": b.y, "alive": b.hp > 0}
             for b in engine.beasts
         ],
+        "fallen": engine.fallen,
         "relations": {
             f"{a}|{b}": rel.name
             for (a, b), rel in engine.relations.items()

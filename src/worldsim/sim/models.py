@@ -161,8 +161,11 @@ class Kingdom:
     founded_month: int = 0  # for "oldest realm" records
     population_history: list[int] = field(default_factory=list)  # yearly samples
     last_gov_shift_month: int = -1_000_000  # cooldown for government shifts
-    tech_level: int = 0  # 0 Stone .. 4 Medieval
-    tech_progress: float = 0.0  # yearly accumulation; 1.0 = era advance
+    tech_level: int = 0  # 0 Stone .. 4 Medieval (derived: max era of techs)
+    tech_progress: float = 0.0  # insight pool; spent on tech nodes
+    techs: set[str] = field(default_factory=set)  # acquired tech node ids
+    mods: dict[str, float] = field(default_factory=dict)  # aggregated bonuses
+    culture: dict[str, float] = field(default_factory=dict)  # evolvable weights
     civilized: bool = False  # tribes civilize upon reaching the Iron Age
     golden_age_until: int = -1  # month until which popcap is boosted
     wars_won: int = 0
@@ -252,6 +255,7 @@ class EventType(IntEnum):
     MILESTONE = auto()
     REBELLION = auto()
     TECH_ERA = auto()
+    TECH_DISCOVERY = auto()
     COLONY_FOUNDED = auto()
     INDEPENDENCE = auto()
     GOLDEN_AGE = auto()

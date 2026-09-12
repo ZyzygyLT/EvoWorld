@@ -497,6 +497,7 @@ def _tick_payload(eng: SimEngine) -> dict:
                 "color": list(k.color),
                 "population_history": [int(p) for p in k.population_history],
                 "tech_level": k.tech_level,
+                "techs": sorted(k.techs),
                 "golden_age": k.golden_age_until > eng.month,
                 "founded_month": k.founded_month,
             }
@@ -512,6 +513,7 @@ def _tick_payload(eng: SimEngine) -> dict:
             {"name": b.name, "x": b.x, "y": b.y, "alive": b.hp > 0}
             for b in eng.beasts
         ],
+        "fallen": eng.fallen,
         "battle_heat": {
             "max": float(heat.max()),
             "cells": [

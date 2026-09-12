@@ -1,5 +1,5 @@
 import React from 'react';
-import { vocab } from '../i18n.js';
+import { vocab, techName, TECH_BRANCH, BRANCH_COLORS } from '../i18n.js';
 
 const ERAS = ['Stone Age', 'Bronze Age', 'Iron Age', 'Classical', 'Medieval'];
 const REL_COLORS = {
@@ -78,6 +78,25 @@ export default function StatsPanel({ stats, govDesc, onClose, claimable, claimed
             {/* population chart */}
             {stats.population_history?.length > 1 && (
                 <PopulationChart values={stats.population_history} color={kcolor} />
+            )}
+
+            {/* tech tree: acquired nodes grouped by branch */}
+            {stats.techs?.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 10, color: '#8b949e', textTransform: 'uppercase', letterSpacing: 1 }}>
+                        Tech ({stats.techs.length})
+                    </div>
+                    {['warfare', 'craft', 'trade', 'lore'].map(br => {
+                        const nodes = stats.techs.filter(t => TECH_BRANCH[t] === br);
+                        if (!nodes.length) return null;
+                        return (
+                            <div key={br} style={{ fontSize: 10, marginTop: 2 }}>
+                                <span style={{ color: BRANCH_COLORS[br] }}>● </span>
+                                {nodes.map(t => techName(lang, t)).join(', ')}
+                            </div>
+                        );
+                    })}
+                </div>
             )}
 
             {/* relations */}

@@ -31,6 +31,11 @@ from worldsim.sim.models import (
     Site,
     War,
 )
+from worldsim.sim.tech import (
+    GOV_BRANCH_AFFINITY,
+    TECHS,
+    available_techs,
+)
 from worldsim.worldgen import World
 
 EXPANSION_DISTANCE = 10
@@ -150,6 +155,8 @@ class SimEngine:
         self._next_beast_id = 1
         self._next_notable_id = 1
         self._milestones: set[str] = set()  # each milestone fires exactly once
+        self._world_techs: set[str] = set()  # techs discovered by anyone
+        self.fallen: list[dict] = []  # memorial of collapsed realms
         self._color_counter = 0  # golden-angle hue assignment
         self._spawn_kingdoms(n_civilized, n_tribal)
         self._spawn_beasts(n_beasts)
@@ -215,6 +222,14 @@ class SimEngine:
             color=_golden_angle_color(self._color_counter),
         )
         self._color_counter += 1
+        # evolvable culture: slight random drift around uniform weights
+        # (wide enough that sibling realms research different branches first)
+        base = {"martial": 0.25, "mercantile": 0.25, "pious": 0.25, "curious": 0.25}
+        k.culture = {
+            axis: max(0.05, w + float(self.rng.normal(0, 0.12)))
+            for axis, w in base.items()
+        }
+        self._refresh_mods(k)
         site = self._make_site(k, x, y, is_capital=True)
         k.sites.append(site)
         self._crown_leader(k)
@@ -398,6 +413,13 @@ class SimEngine:
                 (k.id,),
             )
             self._crown_leader(k)
+            # a new reign shifts the culture slightly (evolvable weights)
+            if k.culture:
+                axes = list(k.culture.keys())
+                a, b = self.rng.choice(axes, size=2, replace=False).tolist()
+                shift = float(self.rng.uniform(0.02, 0.06))
+                k.culture[a] = max(0.05, k.culture[a] - shift)
+                k.culture[b] = k.culture[b] + shift
 
     def _maybe_emerge_hero(self, k: Kingdom) -> None:
         """Battle-hardened kingdoms sometimes produce a champion."""
@@ -517,6 +539,7 @@ class SimEngine:
         """Advance one month (GDD §2)."""
         self.month += 1
         for k in self.kingdoms:
+            self._resettle(k)
             self._grow_kingdom(k)
             self._succession(k)
         self._process_notables()
@@ -586,6 +609,16 @@ class SimEngine:
             for k in self.kingdoms:
                 k.population_history.append(k.total_population)
 
+    def _climate_factor(self) -> float:
+        """Slow global climate cycle (±8%, ~50y period): harvests breathe.
+
+        Pure function of month+seed (no RNG consumed): bountiful decades
+        let cities swell, harsh ones shrink them back. Visible life even
+        in total peace.
+        """
+        phase = (self.world.config.seed % 360) * math.pi / 180
+        return 1.0 + 0.08 * math.sin(2 * math.pi * self.month / 600 + phase)
+
     def _site_trait_avg(self, k: Kingdom, trait: str) -> float:
         """Realm-wide average of a heritable site trait (selection pressure gauge)."""
         if not k.sites:
@@ -605,7 +638,11 @@ class SimEngine:
             # accumulates instead of truncating to zero (which would freeze
             # small villages forever). Fertile bloodlines grow ~±20% faster.
             fertility = site.traits.get("fertility", 0.5)
-            growth = site.population * repro / 5000 * (0.8 + 0.4 * fertility)
+            growth = (
+                site.population * repro / 5000
+                * (0.8 + 0.4 * fertility)
+                * (1 + k.mods.get("growth", 0.0))
+            )
             # a greedy merchant in court squeezes a bit more from the capital
             if site.is_capital and any(
                 n.role == "merchant" for n in self._living_notables(k)
@@ -619,11 +656,17 @@ class SimEngine:
             site.update_category()
 
             # original clamps to popcap FIRST (unconditionally), then halves
-            # and founds a new site only if below MAX_SITES
-            if site.population > site.popcap:
-                site.population = site.popcap
+            # and founds a new site only if below MAX_SITES.
+            # The clamp uses the EFFECTIVE cap: golden ages (+50%) and the
+            # climate cycle (±8%) breathe through it (boom/bust years).
+            cap = site.popcap
+            if k.golden_age_until > self.month:
+                cap *= 1.5
+            cap *= self._climate_factor()
+            if site.population > cap:
+                site.population = cap
                 if len(k.sites) < MAX_SITES:
-                    site.population = site.popcap / 2
+                    site.population = cap / 2
                     self._expand(k, site)
 
             k.total_population += site.population
@@ -815,11 +858,10 @@ class SimEngine:
                 self._end_war(war)
                 continue
             war.battles += 1
-            # armies = militarization % of population, seasoned by race strength
-            # and era (better weapons win battles). Ambitious warlords drill
-            # harder hosts.
-            era_mult = 1.0 + ERA_ARMY_BONUS * a.tech_level
-            era_mult_b = 1.0 + ERA_ARMY_BONUS * b.tech_level
+            # armies = militarization % of population, seasoned by race strength,
+            # era and tech-tree weapons. Ambitious warlords drill harder hosts.
+            era_mult = (1.0 + ERA_ARMY_BONUS * a.tech_level) * (1 + a.mods.get("army", 0.0))
+            era_mult_b = (1.0 + ERA_ARMY_BONUS * b.tech_level) * (1 + b.mods.get("army", 0.0))
             warlords_a = self._living_notables(a, "warlord")
             warlords_b = self._living_notables(b, "warlord")
             drill_a = 1.0 + (0.2 * max(n.ambition for n in warlords_a) if warlords_a else 0.0)
@@ -933,7 +975,9 @@ class SimEngine:
                 {"winner": winner.name, "loser": loser.name, "dead": loss},
                 (winner.id, loser.id),
             )
-        if len(loser.sites) > 1 and self.rng.random() < 0.35:
+        if len(loser.sites) > 1 and self.rng.random() < 0.35 + winner.mods.get(
+            "capture", 0.0
+        ):
             site = loser.sites[int(self.rng.integers(0, len(loser.sites)))]
             while site.is_capital and len(loser.sites) > 1:
                 site = loser.sites[int(self.rng.integers(0, len(loser.sites)))]
@@ -974,14 +1018,44 @@ class SimEngine:
             remaining -= take
         k.total_population = sum(s.population for s in k.sites)
 
+    def _resettle(self, k: Kingdom) -> None:
+        """Migrants flow from populous sites to empty ones (recovery path).
+
+        Without this, a site at 0 population grows 0 forever (0 x rate),
+        freezing realms that lose everything but their land.
+        """
+        empties = [s for s in k.sites if s.population <= 0]
+        if not empties:
+            return
+        for target in empties:
+            donors = [s for s in k.sites if s is not target and s.population > 50]
+            if not donors:
+                break
+            donor = max(donors, key=lambda s: s.population)
+            move = min(15.0, donor.population * 0.1)
+            donor.population -= move
+            target.population += move
+
     def _cleanup_collapsed(self) -> None:
         for k in self.kingdoms:
-            if k.sites or k.total_population > 0:
+            if k.total_population > 0:
                 continue
             already_dead = getattr(k, "_collapsed", False)
             if already_dead:
                 continue
             k._collapsed = True  # type: ignore[attr-defined]
+            # release its land so the map doesn't fill with ghost claims
+            for s in k.sites:
+                if self._occupancy[s.y, s.x] == k.id + 1:
+                    self._occupancy[s.y, s.x] = 0
+            k.sites.clear()
+            self.fallen.append({
+                "name": k.name,
+                "race": k.race.name,
+                "color": list(k.color),
+                "month": self.month,
+                "at_war": k.at_war,
+            })
             self._ev(
                 EventType.KINGDOM_COLLAPSED, "kingdom_collapsed",
                 {"kingdom": k.name},
@@ -1053,6 +1127,13 @@ class SimEngine:
                 self._occupancy[s.y, s.x] = new_k.id + 1
             new_k.total_population = sum(s.population for s in new_k.sites)
             k.total_population = sum(s.population for s in k.sites)
+            # rebels carry the parent's knowledge and culture, drifted
+            new_k.techs = set(k.techs)
+            new_k.culture = {
+                axis: max(0.05, w + float(self.rng.normal(0, 0.05)))
+                for axis, w in (k.culture or {}).items()
+            } or dict(k.culture or {})
+            self._refresh_mods(new_k)
             self._crown_leader(new_k)
             new_k.founded_month = self.month
             self.kingdoms.append(new_k)
@@ -1077,28 +1158,89 @@ class SimEngine:
             self._maybe_plague(k)
             self._maybe_colony(k)
 
-    def _progress_tech(self, k: Kingdom) -> None:
-        """Yearly tech progress; eras advance and transform the realm.
+    def _refresh_mods(self, k: Kingdom) -> None:
+        """Aggregate tech effects + derive era level from acquired techs."""
+        mods: dict[str, float] = {
+            "army": 0.0, "popcap": 0.0, "growth": 0.0, "tech": 0.0,
+            "plague": 0.0, "colony": 0.0, "capture": 0.0,
+            "influence": 0.0, "golden": 0.0,
+        }
+        for tid in k.techs:
+            for eff, val in TECHS[tid]["effects"].items():
+                mods[eff] = mods.get(eff, 0.0) + val
+        k.mods = mods
+        if k.techs:
+            k.tech_level = max(TECHS[tid]["era"] for tid in k.techs)
 
-        Paced for a very ancient feel: Stone Age lasts ~150 years, with
-        knowledge compounding slightly each era (later eras arrive faster).
+    def _branch_affinity(self, k: Kingdom, branch: str) -> float:
+        """Research taste: government doctrine + evolved culture."""
+        gov = GOV_BRANCH_AFFINITY.get(k.government.name, {})
+        gov_w = gov.get(branch, 0.2)
+        cult = k.culture or {}
+        cult_w = {
+            "warfare": cult.get("martial", 0.25),
+            "craft": cult.get("mercantile", 0.25) * 0.5 + cult.get("curious", 0.25) * 0.5,
+            "trade": cult.get("mercantile", 0.25),
+            "lore": cult.get("curious", 0.25) + cult.get("pious", 0.25) * 0.5,
+        }.get(branch, 0.2)
+        return gov_w + cult_w
+
+    def _progress_tech(self, k: Kingdom) -> None:
+        """Yearly research: accumulate insight, acquire one tech, diffuse.
+
+        Paced for a very ancient feel (~150y to the first techs), with
+        knowledge compounding slightly each era. Neighbors ahead share
+        knowledge (catch-up diffusion).
         """
         if self.month % 12 != 0:
             return
-        # progress: tile prosperity (0..1) + government tech bonus, compounding.
+        # insight: tile prosperity (0..1) + government tech bonus, compounding.
         # a pious shaman in court speeds the work of scholars a little.
         prosper = sum(self.world.prosperity[s.y, s.x] for s in k.sites) / max(
             1, len(k.sites)
         )
-        yearly = (0.004 + 0.004 * prosper + max(0, k.government.tech_bonus) * 0.0002)
-        yearly *= 1 + 0.12 * k.tech_level
+        yearly = (0.008 + 0.008 * prosper + max(0, k.government.tech_bonus) * 0.0004)
+        yearly *= 1 + 0.12 * k.tech_level + k.mods.get("tech", 0.0)
         shamans = self._living_notables(k, "shaman")
         if shamans:
             yearly *= 1.0 + 0.2 * max(n.piety for n in shamans)
+        # diffusion: realms behind their neighbors learn faster
+        others_max = 0
+        for o in self.kingdoms:
+            if o is not k and o.sites:
+                others_max = max(others_max, len(o.techs))
+        if others_max > len(k.techs):
+            yearly *= 1.5
         k.tech_progress += yearly
-        if k.tech_progress >= 1.0 and k.tech_level < len(ERA_NAMES) - 1:
-            k.tech_progress = 0.0
-            k.tech_level += 1
+
+        # research choice: cheapest cost adjusted by taste (gov + culture)
+        avail = available_techs(k.techs, k.tech_level)
+        if not avail:
+            return
+        def _score(tid: str) -> float:
+            t = TECHS[tid]
+            taste = self._branch_affinity(k, t["branch"])
+            return t["cost"] / (1.0 + taste + 0.3 * self.rng.random())
+
+        pick = min(avail, key=_score)
+        if k.tech_progress < TECHS[pick]["cost"]:
+            return
+        k.tech_progress -= TECHS[pick]["cost"]
+        old_level = k.tech_level
+        k.techs.add(pick)
+        self._refresh_mods(k)
+        # world-first discovery is newsworthy
+        if pick not in self._world_techs:
+            self._world_techs.add(pick)
+            firsts = [o for o in self.kingdoms if pick in o.techs]
+            _ = firsts  # (the acquirer is k by construction here)
+            self._ev(
+                EventType.TECH_DISCOVERY, "tech_discovery",
+                {"kingdom": k.name, "tech": pick},
+                (k.id,),
+            )
+        # entering a new max era rescales settlements + may civilize
+        if k.tech_level > old_level:
             era = ERA_NAMES[k.tech_level]
             # urbanization: existing settlements can now sustain more people
             mult = self._era_popcap_mult(k)
@@ -1126,15 +1268,16 @@ class SimEngine:
                      "government": gov.name, "era": era},
                     (k.id,),
                 )
-        elif k.tech_progress >= 1.0:
-            # past the last era: slow continuous urban growth (~+1%/year)
+        elif not avail and k.tech_progress >= 1.0:
+            # tree exhausted: slow continuous urban growth (~+1%/year)
             k.tech_progress = 0.0
             for s in k.sites:
                 s.popcap = math.floor(s.popcap * 1.01)
 
     def _era_popcap_mult(self, k: Kingdom) -> float:
-        # primitive agriculture sustains less (Stone x0.7); each era adds 25%
-        mult = 0.7 + ERA_POPCAP_BONUS * k.tech_level
+        # primitive agriculture sustains less (Stone x0.7); each era adds 25%;
+        # tech-tree sustenance techs stack on top
+        mult = (0.7 + ERA_POPCAP_BONUS * k.tech_level) * (1 + k.mods.get("popcap", 0.0))
         if k.golden_age_until > self.month:
             mult *= 1.5
         return mult
@@ -1150,7 +1293,9 @@ class SimEngine:
         # pious courts attract golden ages a little more often
         shamans = self._living_notables(k, "shaman")
         piety_boost = 1.0 + (max(n.piety for n in shamans) if shamans else 0.0)
-        if prosperous and self.rng.random() < TECH_GOLDEN_AGE_CHANCE * piety_boost:
+        if prosperous and self.rng.random() < TECH_GOLDEN_AGE_CHANCE * piety_boost * (
+            1 + k.mods.get("golden", 0.0)
+        ):
             k.golden_age_until = self.month + TECH_GOLDEN_AGE_YEARS * 12
             self._ev(
                 EventType.GOLDEN_AGE, "golden_age", {"kingdom": k.name}, (k.id,),
@@ -1163,6 +1308,7 @@ class SimEngine:
         if self.rng.random() >= PLAGUE_CHANCE_MONTHLY:
             return
         rate = float(self.rng.uniform(*PLAGUE_MORTALITY))
+        rate *= 1.0 + k.mods.get("plague", 0.0)  # pottery etc. soften plagues
         # pious shamans organize quarantines and rites: fewer dead
         shamans = self._living_notables(k, "shaman")
         if shamans:
@@ -1186,7 +1332,7 @@ class SimEngine:
         # greedy merchants fund expeditions
         merchants = self._living_notables(k, "merchant")
         greed_boost = 1.0 + (max(n.greed for n in merchants) if merchants else 0.0)
-        if self.rng.random() >= 0.25 * greed_boost:
+        if self.rng.random() >= 0.25 * greed_boost * (1 + k.mods.get("colony", 0.0)):
             return
         cap = k.capital
         if cap is None:
@@ -1223,6 +1369,16 @@ class SimEngine:
                 )
                 self._color_counter += 1
                 new_k.tech_level = max(0, k.tech_level - 1)
+                # settlers carry a subset of the parent's knowledge + culture
+                new_k.techs = {
+                    tid for tid in k.techs
+                    if TECHS[tid]["era"] <= new_k.tech_level
+                }
+                new_k.culture = {
+                    axis: max(0.05, w + float(self.rng.normal(0, 0.05)))
+                    for axis, w in (k.culture or {}).items()
+                } or dict(k.culture or {})
+                self._refresh_mods(new_k)
                 new_k.sites.append(site)
                 self._occupancy[site.y, site.x] = new_k.id + 1
                 self._crown_leader(new_k)
@@ -1369,7 +1525,7 @@ class SimEngine:
 
     def kingdom_stats(self, k: Kingdom) -> dict:
         """Rich per-kingdom statistics for the UI inspector panel."""
-        era_mult = 1.0 + ERA_ARMY_BONUS * k.tech_level
+        era_mult = (1.0 + ERA_ARMY_BONUS * k.tech_level) * (1 + k.mods.get("army", 0.0))
         military = (
             k.total_population * k.government.militarization / 100
             * k.race.strength * era_mult
@@ -1442,6 +1598,8 @@ class SimEngine:
             "relations": relations_out,
             "population_history": pop_hist,
             "recent_events": my_events,
+            "techs": sorted(k.techs),
+            "culture": {axis: round(w, 3) for axis, w in k.culture.items()},
         }
 
     def territory_map(self) -> np.ndarray:
@@ -1462,7 +1620,11 @@ class SimEngine:
         for k in self.kingdoms:
             if not k.sites:
                 continue
-            radius = ERA_INFLUENCE_RADIUS + ERA_INFLUENCE_PER_LEVEL * k.tech_level
+            radius = int(
+                ERA_INFLUENCE_RADIUS
+                + ERA_INFLUENCE_PER_LEVEL * k.tech_level
+                + k.mods.get("influence", 0.0)
+            )
             for s in k.sites:
                 x0, x1 = max(0, s.x - radius), min(w, s.x + radius + 1)
                 y0, y1 = max(0, s.y - radius), min(h, s.y + radius + 1)
