@@ -433,7 +433,8 @@ def _tick_payload(eng: SimEngine) -> dict:
             ],
         },
         "events": [
-            {"month": e.month, "type": e.type.name, "text": e.text}
+            {"month": e.month, "type": e.type.name, "text": e.text,
+             "msg_key": e.msg_key, "params": e.params}
             for e in eng.chronicle.recent(12)
         ],
     }

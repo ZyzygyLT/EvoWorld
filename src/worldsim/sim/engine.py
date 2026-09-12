@@ -16,6 +16,7 @@ import math
 import numpy as np
 
 from worldsim.data.namegen import NameGenerator
+from worldsim.i18n import render as _render_msg
 from worldsim.sim.models import (
     TRIBAL_GOVERNMENT,
     Beast,
@@ -24,6 +25,7 @@ from worldsim.sim.models import (
     Hero,
     Kingdom,
     Leader,
+    Notable,
     Race,
     Relation,
     Site,
@@ -146,12 +148,29 @@ class SimEngine:
         self._next_leader_id = 1
         self._next_hero_id = 1
         self._next_beast_id = 1
+        self._next_notable_id = 1
         self._milestones: set[str] = set()  # each milestone fires exactly once
         self._color_counter = 0  # golden-angle hue assignment
         self._spawn_kingdoms(n_civilized, n_tribal)
         self._spawn_beasts(n_beasts)
 
     # -- setup ----------------------------------------------------------------
+
+    def _ev(
+        self,
+        type_,
+        key: str,
+        params: dict,
+        kids: tuple[int, ...] = (),
+    ) -> None:
+        """Log a structured, i18n-renderable chronicle event.
+
+        Text is rendered in English at log time (canonical stored text);
+        clients re-render other languages from key+params.
+        """
+        self.chronicle.log(
+            self.month, type_, _render_msg("en", key, params), kids, params, key
+        )
 
     def _suitable_tiles(self, race: Race) -> list[tuple[int, int]]:
         w = self.world
@@ -190,19 +209,23 @@ class SimEngine:
         site = self._make_site(k, x, y, is_capital=True)
         k.sites.append(site)
         self._crown_leader(k)
+        self._appoint_notable(k, "shaman")
         self.kingdoms.append(k)
         self._occupancy[y, x] = k.id + 1
         # totals must be valid from month 0 (fresh paused worlds show real pops)
         k.total_population = sum(s.population for s in k.sites)
-        self.chronicle.log(
-            self.month,
-            EventType.KINGDOM_FOUNDED,
-            f"{k.name} ({race.name}, {gov.name}) founded its capital {site.name}.",
+        self._ev(
+            EventType.KINGDOM_FOUNDED, "kingdom_founded",
+            {"kingdom": k.name, "race": race.name,
+             "government": gov.name, "site": site.name},
             (k.id,),
         )
         return k
 
-    def _make_site(self, k: Kingdom, x: int, y: int, is_capital: bool = False) -> Site:
+    def _make_site(
+        self, k: Kingdom, x: int, y: int, is_capital: bool = False,
+        parent: Site | None = None,
+    ) -> Site:
         w = self.world
         prosper = w.prosperity[y, x]
         # original: PopCap = 4 * ReproductionSpeed + Prosperity*150 (x1.5 river, x2 capital)
@@ -214,6 +237,19 @@ class SimEngine:
         # urbanization: later eras sustain larger settlements
         popcap *= self._era_popcap_mult(k)
         category = "Capital" if is_capital else "Village"
+        # heritable site character: children resemble the parent settlement
+        # (±0.05 mutation), founders roll fresh traits
+        if parent is not None and parent.traits:
+            traits = {
+                t: min(1.0, max(0.0, v + float(self.rng.normal(0, 0.05))))
+                for t, v in parent.traits.items()
+            }
+        else:
+            traits = {
+                "aggression": float(self.rng.uniform(0.3, 0.7)),
+                "fertility": float(self.rng.uniform(0.3, 0.7)),
+                "tradition": float(self.rng.uniform(0.3, 0.7)),
+            }
         return Site(
             x=x,
             y=y,
@@ -222,6 +258,7 @@ class SimEngine:
             popcap=math.floor(popcap),
             is_capital=is_capital,
             population=float(self.rng.integers(10, 21)),  # primitive start: 10-20 souls
+            traits=traits,
         )
 
     def _spawn_beasts(self, n_beasts: int) -> None:
@@ -248,10 +285,8 @@ class SimEngine:
             )
             self._next_beast_id += 1
             self.beasts.append(beast)
-            self.chronicle.log(
-                self.month,
-                EventType.BEAST_SIGHTED,
-                f"A monster was sighted: {name} roams the wilds.",
+            self._ev(
+                EventType.BEAST_SIGHTED, "beast_sighted", {"name": name},
             )
 
     # -- leaders & heroes -------------------------------------------------------
@@ -272,12 +307,63 @@ class SimEngine:
         )
         self._next_leader_id += 1
         k.leader = leader
-        self.chronicle.log(
-            self.month,
-            EventType.LEADER_CROWNED,
-            f"{leader.name} becomes {title} of {k.name}.",
+        self._ev(
+            EventType.LEADER_CROWNED, "leader_crowned",
+            {"leader": leader.name, "title": title, "kingdom": k.name},
             (k.id,),
         )
+
+    def _appoint_notable(self, k: Kingdom, role: str) -> Notable | None:
+        """Appoint a court figure with random personality traits."""
+        if any(n.role == role and n.died_month is None for n in k.notables):
+            return None
+        n = Notable(
+            id=self._next_notable_id,
+            name=self.namegen.name(),
+            kingdom_id=k.id,
+            role=role,
+            ambition=float(self.rng.random()),
+            piety=float(self.rng.random()),
+            greed=float(self.rng.random()),
+            born_month=self.month,
+        )
+        self._next_notable_id += 1
+        k.notables.append(n)
+        return n
+
+    def _living_notables(self, k: Kingdom, role: str | None = None) -> list[Notable]:
+        return [
+            n for n in k.notables
+            if n.died_month is None and (role is None or n.role == role)
+        ]
+
+    def _process_notables(self) -> None:
+        """Age the courts: die ~50y, arrive on milestones (merchant at 800 pop...)."""
+        for k in self.kingdoms:
+            if not k.sites:
+                continue
+            for n in self._living_notables(k):
+                age_months = self.month - n.born_month
+                # ~50y lifespan with wide variance
+                if age_months > 12 * (30 + self.rng.integers(0, 40)):
+                    n.died_month = self.month
+            # merchant arrives with prosperity, warlord with war or iron
+            if k.total_population > 800:
+                made = self._appoint_notable(k, "merchant")
+                if made is not None:
+                    self._ev(
+                        EventType.HERO_EMERGED, "merchant_rose",
+                        {"name": made.name, "kingdom": k.name},
+                        (k.id,),
+                    )
+            if (k.at_war or k.tech_level >= 2) and k.total_population > 400:
+                made = self._appoint_notable(k, "warlord")
+                if made is not None:
+                    self._ev(
+                        EventType.HERO_EMERGED, "warlord_rose",
+                        {"name": made.name, "kingdom": k.name},
+                        (k.id,),
+                    )
 
     def _succession(self, k: Kingdom) -> None:
         """Leaders die on their pre-rolled death month and are succeeded."""
@@ -293,12 +379,12 @@ class SimEngine:
             leader.expected_death_month = self.month + int(reign)
         if self.month >= leader.expected_death_month:
             leader.died_month = self.month
-            self.chronicle.log(
-                self.month,
-                EventType.LEADER_DIED,
-                f"{leader.title} {leader.name} of {k.name} died at age "
-                f"{int(leader.reign_years(self.month))} after "
-                f"{leader.battles_won} victories.",
+            self._ev(
+                EventType.LEADER_DIED, "leader_died",
+                {"title": leader.title, "leader": leader.name,
+                 "kingdom": k.name,
+                 "age": int(leader.reign_years(self.month)),
+                 "victories": leader.battles_won},
                 (k.id,),
             )
             self._crown_leader(k)
@@ -307,7 +393,12 @@ class SimEngine:
         """Battle-hardened kingdoms sometimes produce a champion."""
         if k.hero is not None:
             return
-        if self.rng.random() < HERO_EMERGE_CHANCE and k.at_war:
+        # warlords spot talent: ambitious ones breed more heroes
+        warlords = self._living_notables(k, "warlord")
+        chance = HERO_EMERGE_CHANCE * (
+            1.0 + (max(n.ambition for n in warlords) if warlords else 0.0)
+        )
+        if self.rng.random() < chance and k.at_war:
             hero = Hero(
                 id=self._next_hero_id,
                 name=self.namegen.name(),
@@ -316,11 +407,10 @@ class SimEngine:
             )
             self._next_hero_id += 1
             k.hero = hero
-            self.chronicle.log(
-                self.month,
-                EventType.HERO_EMERGED,
-                f"The champion {hero.name} rises in {k.name} "
-                f"(battle strength x{hero.strength:.1f}).",
+            self._ev(
+                EventType.HERO_EMERGED, "hero_emerged",
+                {"hero": hero.name, "kingdom": k.name,
+                 "strength": f"{hero.strength:.1f}"},
                 (k.id,),
             )
 
@@ -333,11 +423,10 @@ class SimEngine:
             hero.battle_deeds.append(f"victory at month {self.month}")
         if self.rng.random() < HERO_DEATH_CHANCE:
             k.hero = None
-            self.chronicle.log(
-                self.month,
-                EventType.HERO_FELL,
-                f"The champion {hero.name} of {k.name} fell in battle after "
-                f"{len(hero.battle_deeds)} deeds.",
+            self._ev(
+                EventType.HERO_FELL, "hero_fell",
+                {"hero": hero.name, "kingdom": k.name,
+                 "deeds": len(hero.battle_deeds)},
                 (k.id,),
             )
 
@@ -374,11 +463,10 @@ class SimEngine:
                 # kingdom slays the beast (maybe)
                 if self.rng.random() < 0.15:
                     beast.hp = 0
-                    self.chronicle.log(
-                        self.month,
-                        EventType.BEAST_SLAIN,
-                        f"Hunters of {target_k.name} slew the monster {beast.name} "
-                        f"near {target.name}.",
+                    self._ev(
+                        EventType.BEAST_SLAIN, "beast_slain",
+                        {"kingdom": target_k.name, "beast": beast.name,
+                         "site": target.name},
                         (target_k.id,),
                     )
             elif beast.aggression >= 1:
@@ -386,11 +474,9 @@ class SimEngine:
                 dead = max(1, int(beast.power * self.rng.uniform(0.5, 1.5)))
                 target.population = max(0, target.population - dead)
                 self._battle_heat[target.y, target.x] += dead
-                self.chronicle.log(
-                    self.month,
-                    EventType.BEAST_RAMPAGE,
-                    f"The monster {beast.name} ravaged {target.name} "
-                    f"({dead} dead).",
+                self._ev(
+                    EventType.BEAST_RAMPAGE, "beast_rampage",
+                    {"beast": beast.name, "site": target.name, "dead": dead},
                     (target_k.id,),
                 )
 
@@ -422,6 +508,7 @@ class SimEngine:
         for k in self.kingdoms:
             self._grow_kingdom(k)
             self._succession(k)
+        self._process_notables()
         self._process_beasts()
         self._update_relations()
         self._resolve_wars()
@@ -437,56 +524,62 @@ class SimEngine:
         """Fire world-historic achievements exactly once (GDD §7 highlights)."""
         m = self._milestones
 
-        def milestone(key: str, text: str, k: Kingdom | None = None) -> None:
+        def milestone(key: str, msg_key: str, params: dict, k: Kingdom | None = None) -> None:
             if key in m:
                 return
             m.add(key)
             ids = (k.id,) if k else ()
-            self.chronicle.log(self.month, EventType.MILESTONE, f"★ {text}", ids)
+            self._ev(EventType.MILESTONE, msg_key, params, ids)
 
         # firsts
         cities = [s for k in self.kingdoms for s in k.sites if s.category == "City"]
         if cities:
             owner = next(k for k in self.kingdoms if cities[0] in k.sites)
             milestone(
-                "first_city",
-                f"{owner.name} raised the world's first City: {cities[0].name}.",
+                "first_city", "milestone_first_city",
+                {"kingdom": owner.name, "site": cities[0].name},
                 owner,
             )
         if any(w.battles > 0 for w in self.wars):
-            milestone("first_battle", "The first battle in history was fought.")
+            milestone("first_battle", "milestone_first_battle", {})
         heroes = [k for k in self.kingdoms if k.hero]
         if heroes:
             milestone(
-                "first_hero",
-                f"The first champion in history, {heroes[0].hero.name}, walks the land.",
+                "first_hero", "milestone_first_hero",
+                {"hero": heroes[0].hero.name},
                 heroes[0],
             )
         if any(e.type == EventType.BEAST_SLAIN for e in self.chronicle.events):
-            milestone("first_beast_slain", "A monster was slain for the first time.")
+            milestone("first_beast_slain", "milestone_first_beast_slain", {})
         # empires
         empire = next((k for k in self.kingdoms if len(k.sites) >= MAX_SITES), None)
         if empire:
             milestone(
-                "first_empire",
-                f"{empire.name} became the first realm to hold {MAX_SITES} settlements.",
+                "first_empire", "milestone_first_empire",
+                {"kingdom": empire.name, "n": MAX_SITES},
                 empire,
             )
         populous = next((k for k in self.kingdoms if k.total_population >= 10_000), None)
         if populous:
             milestone(
-                "ten_thousand",
-                f"{populous.name} became the first realm to reach 10,000 souls.",
+                "ten_thousand", "milestone_ten_thousand",
+                {"kingdom": populous.name},
                 populous,
             )
         # world age
         if self.month >= 100 * 12:
-            milestone("century", "A full century of recorded history has passed.")
+            milestone("century", "milestone_century", {})
 
     def _sample_history(self) -> None:
         if self.month % 12 == 0:
             for k in self.kingdoms:
                 k.population_history.append(k.total_population)
+
+    def _site_trait_avg(self, k: Kingdom, trait: str) -> float:
+        """Realm-wide average of a heritable site trait (selection pressure gauge)."""
+        if not k.sites:
+            return 0.5
+        return sum(s.traits.get(trait, 0.5) for s in k.sites) / len(k.sites)
 
     def _grow_kingdom(self, k: Kingdom) -> None:
         if not k.sites:
@@ -499,8 +592,16 @@ class SimEngine:
             # slow ancient growth (~2%/month at repro 100 compounded, quartered
             # above half popcap). Population is float: fractional growth
             # accumulates instead of truncating to zero (which would freeze
-            # small villages forever).
-            growth = site.population * repro / 5000
+            # small villages forever). Fertile bloodlines grow ~±20% faster.
+            fertility = site.traits.get("fertility", 0.5)
+            growth = site.population * repro / 5000 * (0.8 + 0.4 * fertility)
+            # a greedy merchant in court squeezes a bit more from the capital
+            if site.is_capital and any(
+                n.role == "merchant" for n in self._living_notables(k)
+            ):
+                growth *= 1.0 + 0.3 * max(
+                    n.greed for n in self._living_notables(k) if n.role == "merchant"
+                )
             if site.population > site.popcap / 2:
                 growth /= 4  # overcrowding slows growth
             site.population = site.population + growth
@@ -532,13 +633,13 @@ class SimEngine:
                 for b in self.beasts
             ):
                 continue
-            site = self._make_site(k, x, y)
+            site = self._make_site(k, x, y, parent=origin)
             k.sites.append(site)
             self._occupancy[y, x] = k.id + 1
-            self.chronicle.log(
-                self.month,
-                EventType.SITE_FOUNDED,
-                f"{k.name} founded {site.name} ({site.category}).",
+            self._ev(
+                EventType.SITE_FOUNDED, "site_founded",
+                {"kingdom": k.name, "site": site.name,
+                 "category": site.category},
                 (k.id,),
             )
             return
@@ -593,24 +694,35 @@ class SimEngine:
                 base_war_chance = 0.10 if combined_aggr >= 4 else (
                     0.08 if combined_aggr >= 3 else 0.03
                 )
-                war_chance = base_war_chance + disparity_bonus + expansionist_chance
+                # aggressive bloodlines push their realms toward war
+                blood_bonus = (
+                    self._site_trait_avg(a, "aggression")
+                    + self._site_trait_avg(b, "aggression")
+                    - 1.0
+                ) * 0.05
+                war_chance = (
+                    base_war_chance + disparity_bonus + expansionist_chance + blood_bonus
+                )
                 if roll < war_chance:
                     self._declare_war(a, b)
                 elif roll < war_chance + 0.08:
                     self._set_relation(a, b, Relation.TENSION)
                 elif roll < war_chance + 0.10:
                     self._set_relation(a, b, Relation.ALLIANCE)
-                    self.chronicle.log(
-                        self.month,
-                        EventType.ALLIANCE_FORMED,
-                        f"{a.name} and {b.name} sealed an alliance.",
+                    self._ev(
+                        EventType.ALLIANCE_FORMED, "alliance_formed",
+                        {"a": a.name, "b": b.name},
                         (a.id, b.id),
                     )
                 else:
                     self._set_relation(a, b, Relation.TENSION if roll < 0.5 else Relation.PEACE)
 
-    def _war_name(self, a: Kingdom, b: Kingdom) -> tuple[str, str]:
-        """Named wars: prefer a border site the aggressor covets; else leader-based."""
+    def _war_name(self, a: Kingdom, b: Kingdom) -> tuple[str, str, str]:
+        """Named wars: prefer a border site the aggressor covets; else leader-based.
+
+        Returns (war_name, cause_key, cause_site) — cause_key is one of
+        "border" | "disputed" for i18n rendering.
+        """
         # find the closest site pair between the two realms
         best: Site | None = None
         best_d = 1 << 30
@@ -620,13 +732,18 @@ class SimEngine:
                 if d < best_d:
                     best_d, best = d, sb
         if best is not None and self.rng.random() < 0.6:
-            return f"The War of {best.name}", f"disputed lands around {best.name}"
+            return f"The War of {best.name}", "disputed", best.name
         if a.leader and b.leader and self.rng.random() < 0.5:
-            return f"The War of {b.leader.name}'s Wrath", "border friction"
-        return f"The {a.name}-{b.name} War", "border friction"
+            return f"The War of {b.leader.name}'s Wrath", "border", ""
+        return f"The {a.name}-{b.name} War", "border", ""
 
     def _declare_war(self, a: Kingdom, b: Kingdom) -> None:
-        name, cause = self._war_name(a, b)
+        name, cause_key, cause_site = self._war_name(a, b)
+        cause = (
+            f"disputed lands around {cause_site}"
+            if cause_key == "disputed"
+            else "border friction"
+        )
         war = War(
             id=self._next_war_id,
             side_a=a,
@@ -640,10 +757,10 @@ class SimEngine:
         self._set_relation(a, b, Relation.WAR)
         a.at_war = True
         b.at_war = True
-        self.chronicle.log(
-            self.month,
-            EventType.WAR_DECLARED,
-            f"{war.name} began: {a.name} and {b.name} clash over {war.cause}!",
+        self._ev(
+            EventType.WAR_DECLARED, "war_declared",
+            {"war": war.name, "a": a.name, "b": b.name,
+             "cause_key": cause_key, "site": cause_site},
             (a.id, b.id),
         )
         # cobeligerant allies join the fight (GDD: active alliances)
@@ -668,10 +785,9 @@ class SimEngine:
         )
         self._next_war_id += 1
         self.wars.append(joined)
-        self.chronicle.log(
-            self.month,
-            EventType.ALLIANCE_JOINED_WAR,
-            f"{joiner.name} joined {war.name} against {enemy.name}, honoring its alliance.",
+        self._ev(
+            EventType.ALLIANCE_JOINED_WAR, "alliance_joined_war",
+            {"joiner": joiner.name, "war": war.name, "enemy": enemy.name},
             (joiner.id, enemy.id),
         )
 
@@ -689,16 +805,21 @@ class SimEngine:
                 continue
             war.battles += 1
             # armies = militarization % of population, seasoned by race strength
-            # and era (better weapons win battles)
+            # and era (better weapons win battles). Ambitious warlords drill
+            # harder hosts.
             era_mult = 1.0 + ERA_ARMY_BONUS * a.tech_level
             era_mult_b = 1.0 + ERA_ARMY_BONUS * b.tech_level
+            warlords_a = self._living_notables(a, "warlord")
+            warlords_b = self._living_notables(b, "warlord")
+            drill_a = 1.0 + (0.2 * max(n.ambition for n in warlords_a) if warlords_a else 0.0)
+            drill_b = 1.0 + (0.2 * max(n.ambition for n in warlords_b) if warlords_b else 0.0)
             pow_a = (
                 a.total_population * a.government.militarization / 100
-                * a.race.strength * era_mult
+                * a.race.strength * era_mult * drill_a
             )
             pow_b = (
                 b.total_population * b.government.militarization / 100
-                * b.race.strength * era_mult_b
+                * b.race.strength * era_mult_b * drill_b
             )
             if a.hero:
                 pow_a *= a.hero.strength
@@ -729,10 +850,9 @@ class SimEngine:
             if war_duration > WAR_DURATION_MAX:
                 # white peace after too long
                 war.end_month = self.month
-                self.chronicle.log(
-                    self.month,
-                    EventType.WAR_ENDED,
-                    f"{war.name} ended in white peace between {a.name} and {b.name}.",
+                self._ev(
+                    EventType.WAR_ENDED, "war_white_peace",
+                    {"war": war.name, "a": a.name, "b": b.name},
                     (a.id, b.id),
                 )
                 self._end_war(war)
@@ -755,20 +875,19 @@ class SimEngine:
 
     def _log_war_end(self, war: War, extra: str = "") -> None:
         v = war.victor
-        text = (
-            f"{v.name} won {war.name} ({war.total_dead} dead over "
-            f"{(war.end_month or self.month) - war.start_month} months)."
-            if v
-            else f"{war.name} ended."
-        )
-        if extra:
-            text += " " + extra
-        self.chronicle.log(
-            self.month,
-            EventType.WAR_ENDED,
-            text,
-            (war.side_a.id, war.side_b.id),
-        )
+        if v:
+            months = (war.end_month or self.month) - war.start_month
+            self._ev(
+                EventType.WAR_ENDED, "war_won",
+                {"victor": v.name, "war": war.name,
+                 "dead": war.total_dead, "months": months},
+                (war.side_a.id, war.side_b.id),
+            )
+        else:
+            self._ev(
+                EventType.WAR_ENDED, "war_ended", {"war": war.name},
+                (war.side_a.id, war.side_b.id),
+            )
 
     def _battle_outcome(self, war: War, winner: Kingdom, loser: Kingdom) -> None:
         # loser loses 5-15% population, a border site may flip
@@ -790,14 +909,19 @@ class SimEngine:
         self._hero_risk(winner, won=True)
         self._hero_risk(loser, won=False)
 
-        self.chronicle.log(
-            self.month,
-            EventType.BATTLE,
-            f"{winner.name} defeated {loser.name} in battle ({loss} dead)"
-            + (f" — champion {winner.hero.name} led the charge!" if winner.hero else "")
-            + ".",
-            (winner.id, loser.id),
-        )
+        if winner.hero:
+            self._ev(
+                EventType.BATTLE, "battle_champion",
+                {"winner": winner.name, "loser": loser.name,
+                 "dead": loss, "champion": winner.hero.name},
+                (winner.id, loser.id),
+            )
+        else:
+            self._ev(
+                EventType.BATTLE, "battle",
+                {"winner": winner.name, "loser": loser.name, "dead": loss},
+                (winner.id, loser.id),
+            )
         if len(loser.sites) > 1 and self.rng.random() < 0.35:
             site = loser.sites[int(self.rng.integers(0, len(loser.sites)))]
             while site.is_capital and len(loser.sites) > 1:
@@ -808,17 +932,17 @@ class SimEngine:
                 if len(winner.sites) < MAX_SITES:
                     winner.sites.append(site)
                     self._occupancy[site.y, site.x] = winner.id + 1
-                    self.chronicle.log(
-                        self.month,
-                        EventType.SITE_CAPTURED,
-                        f"{winner.name} captured {site.name} from {loser.name}.",
+                    self._ev(
+                        EventType.SITE_CAPTURED, "site_captured",
+                        {"winner": winner.name, "site": site.name,
+                         "loser": loser.name},
                         (winner.id, loser.id),
                     )
                 else:
-                    self.chronicle.log(
-                        self.month,
-                        EventType.SITE_CAPTURED,
-                        f"{winner.name} razed {site.name} — {loser.name} lost the settlement.",
+                    self._ev(
+                        EventType.SITE_CAPTURED, "site_razed",
+                        {"winner": winner.name, "site": site.name,
+                         "loser": loser.name},
                         (winner.id, loser.id),
                     )
         if not loser.sites or loser.total_population < 10 or (
@@ -847,10 +971,9 @@ class SimEngine:
             if already_dead:
                 continue
             k._collapsed = True  # type: ignore[attr-defined]
-            self.chronicle.log(
-                self.month,
-                EventType.KINGDOM_COLLAPSED,
-                f"{k.name} has collapsed and is no more.",
+            self._ev(
+                EventType.KINGDOM_COLLAPSED, "kingdom_collapsed",
+                {"kingdom": k.name},
                 (k.id,),
             )
             # end its wars
@@ -875,12 +998,19 @@ class SimEngine:
         for k in list(self.kingdoms):
             if len(k.sites) < REBELLION_MIN_SITES:
                 continue
-            strain = k.war_exhaustion > 24 or (
-                len(k.sites) >= MAX_SITES and k.government.militarization >= 40
+            # ambitious warlords plot coups: high ambition adds strain
+            warlords = self._living_notables(k, "warlord")
+            coup_risk = max([n.ambition for n in warlords] + [0.0])
+            strain = (
+                k.war_exhaustion > 24
+                or (
+                    len(k.sites) >= MAX_SITES and k.government.militarization >= 40
+                )
+                or (coup_risk > 0.85 and len(k.sites) >= REBELLION_MIN_SITES)
             )
             if not strain:
                 continue
-            if self.rng.random() >= REBELLION_CHANCE_MONTHLY:
+            if self.rng.random() >= REBELLION_CHANCE_MONTHLY * (1.0 + coup_risk):
                 continue
 
             # the farthest half of sites secedes (distance to capital)
@@ -901,8 +1031,11 @@ class SimEngine:
                 name=self.namegen.kingdom_name(k.race.form),
                 race=k.race,
                 government=k.government,
-                color=tuple(int(c) for c in self.rng.integers(60, 256, size=3)),
+                color=_golden_angle_color(self._color_counter),
+                civilized=k.civilized,
+                tech_level=k.tech_level,
             )
+            self._color_counter += 1
             for s in seceders:
                 k.sites.remove(s)
                 new_k.sites.append(s)
@@ -911,11 +1044,11 @@ class SimEngine:
             k.total_population = sum(s.population for s in k.sites)
             self._crown_leader(new_k)
             self.kingdoms.append(new_k)
-            self.chronicle.log(
-                self.month,
-                EventType.REBELLION,
-                f"{len(seceders)} settlements of {k.name} rose up and founded "
-                f"{new_k.name} under {new_k.leader.title} {new_k.leader.name}!",
+            self._ev(
+                EventType.REBELLION, "rebellion",
+                {"n": len(seceders), "kingdom": k.name,
+                 "new_kingdom": new_k.name, "title": new_k.leader.title,
+                 "leader": new_k.leader.name},
                 (k.id, new_k.id),
             )
             # the old realm wants its land back: immediate war
@@ -940,12 +1073,16 @@ class SimEngine:
         """
         if self.month % 12 != 0:
             return
-        # progress: tile prosperity (0..1) + government tech bonus, compounding
+        # progress: tile prosperity (0..1) + government tech bonus, compounding.
+        # a pious shaman in court speeds the work of scholars a little.
         prosper = sum(self.world.prosperity[s.y, s.x] for s in k.sites) / max(
             1, len(k.sites)
         )
         yearly = (0.004 + 0.004 * prosper + max(0, k.government.tech_bonus) * 0.0002)
         yearly *= 1 + 0.12 * k.tech_level
+        shamans = self._living_notables(k, "shaman")
+        if shamans:
+            yearly *= 1.0 + 0.2 * max(n.piety for n in shamans)
         k.tech_progress += yearly
         if k.tech_progress >= 1.0 and k.tech_level < len(ERA_NAMES) - 1:
             k.tech_progress = 0.0
@@ -956,10 +1093,9 @@ class SimEngine:
             base_mult = 0.7 + ERA_POPCAP_BONUS * (k.tech_level - 1)
             for s in k.sites:
                 s.popcap = math.floor(s.popcap * mult / base_mult)
-            self.chronicle.log(
-                self.month,
-                EventType.TECH_ERA,
-                f"{k.name} entered the {era}.",
+            self._ev(
+                EventType.TECH_ERA, "tech_era",
+                {"kingdom": k.name, "era": era},
                 (k.id,),
             )
             # tribes entering the Iron Age become civilizations — and so does
@@ -972,11 +1108,10 @@ class SimEngine:
                 old = k.government.name
                 k.government = gov
                 k.last_gov_shift_month = self.month
-                self.chronicle.log(
-                    self.month,
-                    EventType.GOVERNMENT_CHANGED,
-                    f"{k.name} left behind the old {old} ways and formed a "
-                    f"{gov.name} as the {era} dawned.",
+                self._ev(
+                    EventType.GOVERNMENT_CHANGED, "government_civilized",
+                    {"kingdom": k.name, "old": old,
+                     "government": gov.name, "era": era},
                     (k.id,),
                 )
         elif k.tech_progress >= 1.0:
@@ -1000,13 +1135,13 @@ class SimEngine:
             and not k.at_war
             and k.tech_level >= 1
         )
-        if prosperous and self.rng.random() < TECH_GOLDEN_AGE_CHANCE:
+        # pious courts attract golden ages a little more often
+        shamans = self._living_notables(k, "shaman")
+        piety_boost = 1.0 + (max(n.piety for n in shamans) if shamans else 0.0)
+        if prosperous and self.rng.random() < TECH_GOLDEN_AGE_CHANCE * piety_boost:
             k.golden_age_until = self.month + TECH_GOLDEN_AGE_YEARS * 12
-            self.chronicle.log(
-                self.month,
-                EventType.GOLDEN_AGE,
-                f"A golden age dawns upon {k.name} — its cities flourish.",
-                (k.id,),
+            self._ev(
+                EventType.GOLDEN_AGE, "golden_age", {"kingdom": k.name}, (k.id,),
             )
 
     def _maybe_plague(self, k: Kingdom) -> None:
@@ -1016,14 +1151,17 @@ class SimEngine:
         if self.rng.random() >= PLAGUE_CHANCE_MONTHLY:
             return
         rate = float(self.rng.uniform(*PLAGUE_MORTALITY))
+        # pious shamans organize quarantines and rites: fewer dead
+        shamans = self._living_notables(k, "shaman")
+        if shamans:
+            rate *= 1.0 - 0.3 * max(n.piety for n in shamans)
         dead = int(k.total_population * rate)
         self._apply_population_loss(k, dead)
         for s in k.sites:
             self._battle_heat[s.y, s.x] += s.population * rate * 0.5
-        self.chronicle.log(
-            self.month,
-            EventType.PLAGUE,
-            f"A terrible plague ravaged {k.name} — {dead} souls perished.",
+        self._ev(
+            EventType.PLAGUE, "plague",
+            {"kingdom": k.name, "dead": dead},
             (k.id,),
         )
 
@@ -1033,7 +1171,10 @@ class SimEngine:
             return
         if self.month % 6 != 0:  # colonization attempts every 6 months
             return
-        if self.rng.random() >= 0.25:
+        # greedy merchants fund expeditions
+        merchants = self._living_notables(k, "merchant")
+        greed_boost = 1.0 + (max(n.greed for n in merchants) if merchants else 0.0)
+        if self.rng.random() >= 0.25 * greed_boost:
             return
         cap = k.capital
         if cap is None:
@@ -1049,7 +1190,7 @@ class SimEngine:
                 for b in self.beasts
             ):
                 continue
-            site = self._make_site(k, x, y)
+            site = self._make_site(k, x, y, parent=cap)
             k.sites.append(site)
             self._occupancy[y, x] = k.id + 1
             if dist >= COLONY_INDEPENCE_DISTANCE and len(self.kingdoms) < MAX_KINGDOMS:
@@ -1066,6 +1207,7 @@ class SimEngine:
                     race=k.race,
                     government=k.government,
                     color=_golden_angle_color(self._color_counter),
+                    civilized=k.civilized,
                 )
                 self._color_counter += 1
                 new_k.tech_level = max(0, k.tech_level - 1)
@@ -1074,18 +1216,16 @@ class SimEngine:
                 self._crown_leader(new_k)
                 new_k.total_population = site.population
                 self.kingdoms.append(new_k)
-                self.chronicle.log(
-                    self.month,
-                    EventType.INDEPENDENCE,
-                    f"The distant colony {site.name} declared independence from "
-                    f"{k.name}, founding {new_k.name}!",
+                self._ev(
+                    EventType.INDEPENDENCE, "independence",
+                    {"site": site.name, "kingdom": k.name,
+                     "new_kingdom": new_k.name},
                     (k.id, new_k.id),
                 )
             else:
-                self.chronicle.log(
-                    self.month,
-                    EventType.COLONY_FOUNDED,
-                    f"{k.name} founded the colony {site.name} in distant lands.",
+                self._ev(
+                    EventType.COLONY_FOUNDED, "colony_founded",
+                    {"kingdom": k.name, "site": site.name},
                     (k.id,),
                 )
             return
@@ -1137,11 +1277,16 @@ class SimEngine:
                 (g for g in civ_govs if g.name == "Military Dictatorship"), None
             )
             if new_gov is not None:
-                self._change_government(k, new_gov, "amid a losing war")
+                self._change_government(k, new_gov, "losing_war")
                 return
 
-        # cooldown: no flip-flopping between golden-age shifts
-        if self.month - k.last_gov_shift_month >= GOV_SHIFT_COOLDOWN_YEARS * 12:
+        # cooldown: no flip-flopping between golden-age shifts; traditional
+        # realms take even longer to change their ways
+        tradition_years = int(self._site_trait_avg(k, "tradition") * 10)
+        if (
+            self.month - k.last_gov_shift_month
+            >= (GOV_SHIFT_COOLDOWN_YEARS + tradition_years) * 12
+        ):
             self._golden_age_or_peace_shifts(k, civ_govs)
 
         # military dictatorship reverts after its war ends
@@ -1158,7 +1303,7 @@ class SimEngine:
                     # Stone Age has no monarchies: dissolve back into a council
                     new_gov = TRIBAL_GOVERNMENT
                 self._change_government(
-                    k, new_gov, "as the wartime junta ceded power"
+                    k, new_gov, "junta_ceded"
                 )
 
     def _golden_age_or_peace_shifts(self, k: Kingdom, civ_govs: list) -> None:
@@ -1182,7 +1327,7 @@ class SimEngine:
             if not options:
                 return
             choice = options[int(self.rng.integers(0, len(options)))]
-            self._change_government(k, choice, "in a golden age")
+            self._change_government(k, choice, "golden_age")
             return
         # stagnant absolute monarchy under long peace -> constitutional monarchy
         long_peace = not k.at_war and k.war_exhaustion == 0 and self.month > 24 * 12
@@ -1192,17 +1337,18 @@ class SimEngine:
                 (g for g in civ_govs if g.name == "Constitutional monarchy"), None
             )
             if new_gov is not None:
-                self._change_government(k, new_gov, "after decades of peace")
+                self._change_government(k, new_gov, "decades_peace")
 
-    def _change_government(self, k: Kingdom, new_gov, reason: str) -> None:
+    def _change_government(self, k: Kingdom, new_gov, reason_key: str) -> None:
+        """reason_key is one of the fixed reason ids (translated at render)."""
         old = k.government.name
         k.government = new_gov
         k.war_exhaustion = 0
         k.last_gov_shift_month = self.month
-        self.chronicle.log(
-            self.month,
-            EventType.GOVERNMENT_CHANGED,
-            f"{k.name} shifted from {old} to {new_gov.name} {reason}.",
+        self._ev(
+            EventType.GOVERNMENT_CHANGED, "government_changed",
+            {"kingdom": k.name, "old": old,
+             "government": new_gov.name, "reason_key": reason_key},
             (k.id,),
         )
 

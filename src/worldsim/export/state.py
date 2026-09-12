@@ -101,6 +101,8 @@ def engine_to_dict(engine: SimEngine) -> dict:
                 "type": e.type.name,
                 "text": e.text,
                 "kingdoms": list(e.kingdom_ids),
+                "msg_key": e.msg_key,
+                "params": e.params,
             }
             for e in engine.chronicle.events
         ],

@@ -58,11 +58,20 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(engine.summary())
 
     if args.chronicle:
+        from worldsim.i18n import render as _render
+
         out = Path(args.chronicle)
         out.parent.mkdir(parents=True, exist_ok=True)
-        lines = [f"[month {e.month}] {e.text}" for e in engine.chronicle.events]
+        lines = []
+        for e in engine.chronicle.events:
+            text = (
+                _render(args.lang, e.msg_key, e.params)
+                if e.msg_key
+                else e.text
+            )
+            lines.append(f"[month {e.month}] {text}")
         out.write_text("\n".join(lines), encoding="utf-8")
-        print(f"Chronicle -> {out} ({len(engine.chronicle.events)} events)")
+        print(f"Chronicle ({args.lang}) -> {out} ({len(engine.chronicle.events)} events)")
 
     if args.export:
         from worldsim.export.state import engine_to_json
@@ -92,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--ticks", type=int, default=240)
     r.add_argument("--chronicle", default=None, help="Write chronicle log to file")
     r.add_argument("--export", default=None, help="Write full state JSON to file")
+    r.add_argument("--lang", default="es", choices=["es", "en"],
+                   help="Chronicle language")
     r.set_defaults(func=cmd_run)
 
     args = p.parse_args(argv)

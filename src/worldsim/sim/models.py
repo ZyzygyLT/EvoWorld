@@ -61,6 +61,11 @@ class Site:
     population: float = 20.0  # float internally (fractional growth accumulates)
     popcap: float = 0.0
     is_capital: bool = False
+    traits: dict[str, float] = field(default_factory=dict)
+    # heritable site character 0..1: aggression (war enthusiasm),
+    # fertility (growth), tradition (resistance to change).
+    # Prosperous sites found more children, so their traits spread
+    # through the realm by natural selection.
 
     def update_category(self) -> None:
         if self.population >= 400:
@@ -70,6 +75,25 @@ class Site:
 
 
 # -- Leaders & heroes ------------------------------------------------------------
+
+
+@dataclass
+class Notable:
+    """A court figure with personality traits that nudge realm decisions.
+
+    Unlike the single Leader, notables are advisors whose traits modulate
+    existing systems by small legible amounts (all narrated in the chronicle).
+    """
+
+    id: int
+    name: str
+    kingdom_id: int
+    role: str  # "shaman" | "merchant" | "warlord"
+    ambition: float  # 0..1 — expansionism, coup risk
+    piety: float  # 0..1 — tech/golden ages, plague resilience
+    greed: float  # 0..1 — growth/colonies
+    born_month: int
+    died_month: int | None = None
 
 
 @dataclass
@@ -133,6 +157,7 @@ class Kingdom:
     years_since_founding: int = 0
     leader: Leader | None = None
     hero: Hero | None = None
+    notables: list[Notable] = field(default_factory=list)  # court figures
     population_history: list[int] = field(default_factory=list)  # yearly samples
     last_gov_shift_month: int = -1_000_000  # cooldown for government shifts
     tech_level: int = 0  # 0 Stone .. 4 Medieval
@@ -237,8 +262,10 @@ class Event:
     id: int
     month: int
     type: EventType
-    text: str
+    text: str  # canonical English text (rendered at log time)
     kingdom_ids: tuple[int, ...] = ()
+    params: dict = field(default_factory=dict)  # structured data for i18n re-render
+    msg_key: str = ""  # i18n template key; "" = legacy free text
 
     @classmethod
     def make(
@@ -247,8 +274,13 @@ class Event:
         type_: EventType,
         text: str,
         kingdom_ids: tuple[int, ...] = (),
+        params: dict | None = None,
+        msg_key: str = "",
     ) -> Event:
-        return cls(id=next(_EVENT_ID), month=month, type=type_, text=text, kingdom_ids=kingdom_ids)
+        return cls(
+            id=next(_EVENT_ID), month=month, type=type_, text=text,
+            kingdom_ids=kingdom_ids, params=params or {}, msg_key=msg_key,
+        )
 
 
 @dataclass
@@ -263,8 +295,10 @@ class Chronicle:
         type_: EventType,
         text: str,
         kingdom_ids: tuple[int, ...] = (),
+        params: dict | None = None,
+        msg_key: str = "",
     ) -> Event:
-        e = Event.make(month, type_, text, kingdom_ids)
+        e = Event.make(month, type_, text, kingdom_ids, params, msg_key)
         self.events.append(e)
         return e
 
@@ -283,6 +317,7 @@ __all__ = [
     "Site",
     "Leader",
     "Hero",
+    "Notable",
     "Kingdom",
     "Relation",
     "War",
