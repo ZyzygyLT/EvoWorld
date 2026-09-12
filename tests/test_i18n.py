@@ -39,7 +39,8 @@ def test_spanish_renders_without_placeholders():
         ("battle_champion", {"winner": "A", "loser": "B", "dead": 5, "champion": "C"}),
         ("leader_died", {"title": "King", "leader": "L", "kingdom": "K",
                          "age": 40, "victories": 3}),
-        ("rebellion", {"n": 4, "kingdom": "K", "new_kingdom": "N", "title": "Chief", "leader": "L"}),
+        ("rebellion", {"n": 4, "kingdom": "K", "new_kingdom": "N",
+                         "title": "Chief", "leader": "L"}),
     ]
     for key, params in cases:
         for lang in ("es", "en"):

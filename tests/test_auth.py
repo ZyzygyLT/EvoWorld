@@ -64,7 +64,8 @@ def test_register_validation(tmp_path):
 
 def test_world_ownership_and_mine_filter(tmp_path):
     c = _fresh(tmp_path)
-    tok = c.post("/api/auth/register", json={"username": "ada", "password": "qubit42"}).json()["token"]
+    reg = c.post("/api/auth/register", json={"username": "ada", "password": "qubit42"})
+    tok = reg.json()["token"]
 
     r = c.post("/api/worlds", json={"seed": 1, "width": 80, "height": 50},
                headers={"Authorization": f"Bearer {tok}"})
@@ -86,7 +87,8 @@ def test_world_ownership_and_mine_filter(tmp_path):
 
 def test_claim_links_account(tmp_path):
     c = _fresh(tmp_path)
-    tok = c.post("/api/auth/register", json={"username": "gimli", "password": "axe1234"}).json()["token"]
+    reg = c.post("/api/auth/register", json={"username": "gimli", "password": "axe1234"})
+    tok = reg.json()["token"]
     wid = c.post("/api/worlds", json={"seed": 5, "width": 80, "height": 50, "mode": "league"},
                  headers={"Authorization": f"Bearer {tok}"}).json()["id"]
     r = c.post(f"/api/worlds/{wid}/claims",
