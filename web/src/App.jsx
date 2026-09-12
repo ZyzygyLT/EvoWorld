@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import WorldMap from './components/WorldMap.jsx';
 import Sidebar from './components/Sidebar.jsx';
+import StartScreen from './components/StartScreen.jsx';
+import { ensureIdentity, getIdentity } from './identity.js';
 
 /**
  * worldsim web client.
- * Flow: create a world (POST /api/worlds) -> connect to the live WS stream.
- * New worlds start PAUSED at x1 — look at the map first, then press run.
+ * Start screen (lobby) -> create or open a world -> live WS stream.
+ * ?world=N deep-links straight into a world (shareable room link).
  */
 export default function App() {
     const [worlds, setWorlds] = useState([]);
@@ -16,8 +18,12 @@ export default function App() {
     const [speed, setSpeed] = useState(1);
     const [busy, setBusy] = useState(false);
     const [selected, setSelected] = useState(null);
+    const [selectedStats, setSelectedStats] = useState(null);  // survives ticks
     const [mapMode, setMapMode] = useState('biome');
     const [worldId, setWorldId] = useState(null);
+    const [worldMode, setWorldMode] = useState('single');
+    const [claims, setClaims] = useState([]);
+    const [standings, setStandings] = useState([]);
     const [toasts, setToasts] = useState([]);
     const wsRef = useRef(null);
 
@@ -28,8 +34,8 @@ export default function App() {
         return () => clearTimeout(t);
     }, [toasts]);
 
-    // live rich stats for the selected kingdom (streamed by the server)
-    const stats = tick?.selected_stats ?? null;
+    // live rich stats for the selected kingdom (private per-socket channel)
+    const stats = selectedStats;
     const govDesc = stats
         ? meta?.governments?.find(g => g.name === stats.government)?.description
         : null;
@@ -40,9 +46,26 @@ export default function App() {
     useEffect(() => {
         refreshList();
         fetch('/api/meta').then(r => r.json()).then(setMeta);
+        ensureIdentity();
+        // deep link: ?world=N opens that world straight away
+        const q = new URLSearchParams(location.search).get('world');
+        if (q) openStream(parseInt(q, 10));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const openStream = (id) => {
+    // league claims polling (crowns on the map + dynasty tab need it)
+    useEffect(() => {
+        if (!worldId) return;
+        const load = () => {
+            fetch(`/api/worlds/${worldId}/claims`).then(r => r.json()).then(setClaims).catch(() => {});
+            fetch(`/api/worlds/${worldId}/standings`).then(r => r.json()).then(setStandings).catch(() => {});
+        };
+        load();
+        const iv = setInterval(load, 4000);
+        return () => clearInterval(iv);
+    }, [worldId]);
+
+    const openStream = (id, modeHint) => {
         if (wsRef.current) wsRef.current.close();
         fetch(`/api/worlds/${id}`).then(r => r.json()).then(s => {
             setState(s);
@@ -50,11 +73,22 @@ export default function App() {
             setPaused(true);   // every opened world starts paused
             setSpeed(1);
             setSelected(null);
+            setSelectedStats(null);
+            setClaims([]);
+            setStandings([]);
+            // world mode for conditional UI (dynasty tab, claim buttons)
+            const entry = worlds.find(w => w.id === id);
+            const m = modeHint || entry?.mode || 'single';
+            setWorldMode(m);
+            history.replaceState(null, '', `?world=${id}`);
             const ws = new WebSocket(`ws://${location.host}/api/ws/${id}`);
             ws.onmessage = (m) => {
                 const data = JSON.parse(m.data);
                 if (data.type === 'system') {
                     setToasts(t => [...t.slice(-3), { id: Date.now() + Math.random(), text: data.text }]);
+                } else if (data.type === 'stats') {
+                    // private per-socket channel: never clobbered by ticks
+                    setSelectedStats(data.stats);
                 } else if (data.type === 'tick') {
                     setTick(data);
                 }
@@ -75,38 +109,106 @@ export default function App() {
         }
     }, [speed, paused, selected]);
 
-    const createWorld = () => {
+    const createWorld = (params) => {
         setBusy(true);
         fetch('/api/worlds', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ seed: Math.floor(Math.random() * 99999), months: 0 }),
+            body: JSON.stringify(params),
         })
             .then(r => r.json())
-            .then(d => { setBusy(false); setState(d.state); setWorldId(d.id); openStream(d.id); refreshList(); });
+            .then(d => {
+                setBusy(false);
+                setState(d.state);
+                setWorldId(d.id);
+                setWorldMode(params.mode || 'single');
+                openStream(d.id, params.mode);
+                refreshList();
+            });
     };
+
+    const backToMenu = () => {
+        if (wsRef.current) wsRef.current.close();
+        setState(null);
+        setTick(null);
+        setWorldId(null);
+        setSelected(null);
+        setSelectedStats(null);
+        setClaims([]);
+        setStandings([]);
+        history.replaceState(null, '', location.pathname);
+        refreshList();
+    };
+
+    const copyInvite = () => {
+        const url = `${location.origin}${location.pathname}?world=${worldId}`;
+        navigator.clipboard?.writeText(url).catch(() => {});
+        setToasts(t => [...t.slice(-3), { id: Date.now() + Math.random(), text: `🔗 invite link copied: ${url}` }]);
+    };
+
+    const doClaim = async (kingdomId) => {
+        const { token } = getIdentity();
+        let name = getIdentity().name;
+        if (!name) {
+            name = prompt('your oracle name?') || '';
+            if (!name.trim()) return;
+            const { setIdentityName } = await import('./identity.js');
+            setIdentityName(name.trim());
+        }
+        const tok = token || await ensureIdentity();
+        const r = await fetch(`/api/worlds/${worldId}/claims`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                kingdom_id: kingdomId,
+                user_token: tok,
+                user_name: (name || getIdentity().name).trim(),
+            }),
+        });
+        if (r.ok) {
+            fetch(`/api/worlds/${worldId}/claims`).then(r => r.json()).then(setClaims).catch(() => {});
+        } else {
+            const err = await r.json().catch(() => ({}));
+            setToasts(t => [...t.slice(-3), { id: Date.now() + Math.random(), text: `⚠ claim failed: ${err.detail || r.status}` }]);
+        }
+    };
+
+    // lobby: no world open yet
+    if (!worldId) {
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+                <header style={header}>
+                    <strong style={{ color: '#58a6ff' }}>worldsim</strong>
+                    <span style={{ color: '#8b949e', fontSize: 12 }}>
+                        fantasy worlds with emergent history
+                    </span>
+                </header>
+                <StartScreen
+                    worlds={worlds}
+                    meta={meta}
+                    busy={busy}
+                    onCreate={createWorld}
+                    onOpen={openStream}
+                />
+            </div>
+        );
+    }
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
             <header style={header}>
                 <strong style={{ color: '#58a6ff' }}>worldsim</strong>
-                <button style={btn} onClick={createWorld} disabled={busy}>
-                    {busy ? 'generando mundo…' : '+ new world'}
-                </button>
+                <button style={btn} onClick={backToMenu}>‹ worlds</button>
+                {worldMode === 'league' && (
+                    <button style={{ ...btn, fontSize: 12 }} onClick={copyInvite}
+                            title="copy shareable room link">
+                        🔗 invite
+                    </button>
+                )}
                 <span style={{ color: '#8b949e', fontSize: 12 }}>
-                    {worlds.length} saved · drag pan · wheel zoom · F re-fit · click site/kingdom
+                    {worldMode === 'league' ? '👑 dynasty league' : '👁 observing'} · drag pan · wheel zoom · F re-fit · click site/kingdom
                 </span>
                 <span style={{ flex: 1 }} />
-                {worlds.slice(0, 8).map(w => (
-                    <button
-                        key={w.id}
-                        style={{ ...btn, fontSize: 11 }}
-                        onClick={() => openStream(w.id)}
-                        title={`seed ${w.seed}`}
-                    >
-                        #{w.id} (seed {w.seed})
-                    </button>
-                ))}
             </header>
             <div style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative' }}>
                 <WorldMap
@@ -114,11 +216,14 @@ export default function App() {
                     tick={tick}
                     mapMode={mapMode}
                     onMapMode={setMapMode}
-                    onSiteClick={(k) => setSelected(k)}
-                    onBackgroundClick={() => setSelected(null)}
+                    onSiteClick={(k) => { setSelected(k); setSelectedStats(null); }}
+                    onBackgroundClick={() => { setSelected(null); setSelectedStats(null); }}
                     stats={stats}
                     govDesc={govDesc}
-                    onClearSelection={() => setSelected(null)}
+                    onClearSelection={() => { setSelected(null); setSelectedStats(null); }}
+                    claims={claims}
+                    worldMode={worldMode}
+                    onClaim={doClaim}
                 />
                 {/* system toasts (prophecy resolutions, chat) */}
                 <div style={{ position: 'absolute', top: 40, right: 360, zIndex: 20, display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 340 }}>
@@ -143,6 +248,10 @@ export default function App() {
                     selected={selected}
                     onSelect={setSelected}
                     worldId={worldId}
+                    worldMode={worldMode}
+                    claims={claims}
+                    standings={standings}
+                    onClaim={doClaim}
                 />
             </div>
         </div>

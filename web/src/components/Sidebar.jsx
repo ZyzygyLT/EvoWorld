@@ -3,7 +3,7 @@ import RoomPanel from './RoomPanel.jsx';
 
 /** Right sidebar: kingdoms list, ongoing wars, chronicle feed with filters.
  * (Per-kingdom stats live in the floating StatsPanel over the map.) */
-export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect, worldId }) {
+export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect, worldId, worldMode, claims, standings, onClaim }) {
     const [showKingdoms, setShowKingdoms] = React.useState(true);
     const [showRoom, setShowRoom] = React.useState(false);
     if (!tick) return <aside style={aside}>waiting for simulation…</aside>;
@@ -94,7 +94,8 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                 >{showRoom ? '▾ room' : '▸ room (multiplayer)'}</button>
             </div>
             {showRoom && (
-                <RoomPanel worldId={worldId} month={tick.month} meta={meta} />
+                <RoomPanel worldId={worldId} month={tick.month} meta={meta}
+                    claims={claims} standings={standings} tick={tick} onClaim={onClaim} />
             )}
         </aside>
     );

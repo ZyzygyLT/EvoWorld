@@ -16,20 +16,21 @@ import worldsim.server.runner as runnermod
 
 
 def _fresh_app(monkeypatch, tmp_path: Path):
-    """Isolated app instance with its own DB + runner registry per test."""
+    """Isolated app instance with its own DB + runner registry per test.
+
+    Single patch point: db.SessionLocal covers app/resolver/league.
+    """
     db_file = tmp_path / "test_worlds.db"
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    import worldsim.server.prediction_resolver as resolver
+    import worldsim.server.db as dbmod
 
     test_engine = create_engine(
         f"sqlite:///{db_file}", connect_args={"check_same_thread": False}
     )
-    session = sessionmaker(bind=test_engine)
-    appmod.SessionLocal = session
-    resolver.SessionLocal = session
+    dbmod.SessionLocal = sessionmaker(bind=test_engine)
     runnermod.registry = runnermod.RunnerRegistry()
     appmod.registry = runnermod.registry
     appmod.Base.metadata.create_all(test_engine)
@@ -138,20 +139,27 @@ def test_kingdom_stats_endpoint(tmp_path, monkeypatch):
 
 
 def test_ws_selected_stats_stream(tmp_path, monkeypatch):
-    """Selecting a kingdom streams its rich stats back on that socket."""
+    """Selecting a kingdom pushes its rich stats on a private channel.
+
+    Broadcast ticks never carry selection state (that was the
+    panel-stays-hidden bug); the socket that selected gets its own
+    {'type': 'stats'} message immediately and after every broadcast.
+    """
     c = _fresh_app(monkeypatch, tmp_path)
     r = c.post("/api/worlds", json={"seed": 7, "width": 80, "height": 50, "months": 0})
     wid = r.json()["id"]
 
     with c.websocket_connect(f"/api/ws/{wid}") as ws:
         data = ws.receive_json()
-        assert data["selected_stats"] is None  # nothing selected yet
+        assert data["type"] == "tick"
+        assert "selected_stats" not in data  # ticks carry no selection state
         ws.send_json({"selected": 0})
-        data2 = ws.receive_json()  # immediate snapshot on selection
-        assert data2["selected_stats"] is not None
-        assert data2["selected_stats"]["id"] == 0
-        assert "military_power" in data2["selected_stats"]
-        # deselection clears it
+        data2 = ws.receive_json()  # immediate private reply on selection
+        assert data2["type"] == "stats"
+        assert data2["stats"]["id"] == 0
+        assert "military_power" in data2["stats"]
+        # deselection clears it with an explicit null stats message
         ws.send_json({"selected": None})
         data3 = ws.receive_json()
-        assert data3["selected_stats"] is None
+        assert data3["type"] == "stats"
+        assert data3["stats"] is None

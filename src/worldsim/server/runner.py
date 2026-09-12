@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import weakref
 from dataclasses import dataclass
 
 from worldsim.data.loaders import load_governments, load_races
@@ -33,15 +32,16 @@ class RunnerConfig:
 class WorldRunner:
     """A live simulation shared by all connected clients."""
 
-    def __init__(self, world_id: int, seed: int, width: int, height: int) -> None:
+    def __init__(self, world_id: int, seed: int, width: int, height: int,
+                 enabled_races: list[str] | None = None) -> None:
         self.world_id = world_id
+        self.enabled_races = enabled_races
         self.eng = self._build_engine(seed, width, height)
         self.speed = 1
         self.paused = True
-        self.subscribers: list[weakref.ref] = []
+        self.subscribers: dict[int, dict] = {}  # id(ws) -> {ws, selected}
         self._task: asyncio.Task | None = None
-        self.selected_stats = None  # replaced by per-connection selection
-        self._lock = asyncio.Lock()
+        self._last_score_month = 0  # league scoring cursor
 
     def _build_engine(self, seed: int, width: int, height: int) -> SimEngine:
         cfg = WorldConfig(seed=seed, width=width, height=height)
@@ -49,7 +49,8 @@ class WorldRunner:
         data_dir = self._data_dir()
         races = load_races(data_dir / "Races.txt")
         govs = load_governments(data_dir / "CivilizedGovernment.txt")
-        return SimEngine(world, races, govs, seed=seed)
+        return SimEngine(world, races, govs, seed=seed,
+                         enabled_races=self.enabled_races)
 
     @staticmethod
     def _data_dir():
@@ -58,30 +59,44 @@ class WorldRunner:
         return Path(__file__).resolve().parents[3] / "data"
 
     def subscribe(self, ws) -> None:
-        self.subscribers.append(weakref.ref(ws))
+        self.subscribers[id(ws)] = {"ws": ws, "selected": None}
 
     def unsubscribe(self, ws) -> None:
-        self.subscribers = [s for s in self.subscribers if s() is not ws and s() is not None]
+        self.subscribers.pop(id(ws), None)
+
+    def set_selected(self, ws, selected_id: int | None) -> None:
+        sub = self.subscribers.get(id(ws))
+        if sub is not None:
+            sub["selected"] = selected_id
 
     async def start(self) -> None:
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
 
     async def _run(self) -> None:
+        import traceback
+
         while True:
             await asyncio.sleep(PUSH_INTERVAL)
             if self.paused:
                 continue
-            for _ in range(self.speed):
-                self.eng.tick()
-            resolved = resolve_pending(self.world_id, self.eng)
-            if resolved:
-                for r in resolved:
-                    self._broadcast_system(
-                        f"★ Prophecy resolved: {r['user_name']} — {r['text']} "
-                        f"(+{r['points']} pts)"
-                    )
-            self._broadcast_tick()
+            try:
+                for _ in range(self.speed):
+                    self.eng.tick()
+                resolved = resolve_pending(self.world_id, self.eng)
+                if resolved:
+                    for r in resolved:
+                        self._broadcast_system(
+                            f"★ Prophecy resolved: {r['user_name']} — {r['text']} "
+                            f"(+{r['points']} pts)"
+                        )
+                self._broadcast_league_scores()
+                self._check_season_end()
+                self._broadcast_tick()
+            except Exception:
+                # NEVER let one bad tick kill the shared clock silently
+                # (this once froze every spectator with zero diagnostics)
+                traceback.print_exc()
 
     # -- broadcast ---------------------------------------------------------
 
@@ -90,24 +105,55 @@ class WorldRunner:
 
         payload = json.dumps(_tick_payload(self.eng))
         self._send_all(payload)
+        # per-socket stats channel: each spectator's selected kingdom stats
+        # are pushed right after the shared tick, so a selection never gets
+        # clobbered by the next broadcast (the panel-stays-hidden bug)
+        for sub in list(self.subscribers.values()):
+            sel = sub["selected"]
+            if sel is None:
+                continue
+            k = next((k for k in self.eng.kingdoms if k.id == sel), None)
+            if k is None:
+                continue
+            stats_msg = json.dumps(
+                {"type": "stats", "stats": self.eng.kingdom_stats(k)}
+            )
+            try:
+                asyncio.create_task(sub["ws"].send_text(stats_msg))
+            except Exception:
+                self.subscribers.pop(id(sub["ws"]), None)
 
     def _broadcast_system(self, text: str) -> None:
         payload = json.dumps({"type": "system", "text": text})
         self._send_all(payload)
 
+    def _broadcast_league_scores(self) -> None:
+        """Score claims since the last cursor and toast the owners."""
+        from worldsim.server.league import score_new_events
+
+        messages = score_new_events(self.world_id, self.eng, self._last_score_month)
+        self._last_score_month = self.eng.month
+        for m in messages:
+            self._broadcast_system(m)
+
+    def _check_season_end(self) -> None:
+        """Freeze league worlds at season_years and crown the champion."""
+        from worldsim.server.league import maybe_end_season
+
+        msg = maybe_end_season(self.world_id, self.eng)
+        if msg is not None:
+            self.paused = True
+            self._broadcast_system(msg)
+
     def _send_all(self, payload: str) -> None:
         dead = []
-        for ref in self.subscribers:
-            ws = ref()
-            if ws is None:
-                dead.append(ref)
-                continue
+        for key, sub in list(self.subscribers.items()):
             try:
-                asyncio.create_task(ws.send_text(payload))
+                asyncio.create_task(sub["ws"].send_text(payload))
             except Exception:
-                dead.append(ref)
-        for ref in dead:
-            self.subscribers = [s for s in self.subscribers if s is not ref]
+                dead.append(key)
+        for key in dead:
+            self.subscribers.pop(key, None)
 
 
 class RunnerRegistry:
@@ -116,9 +162,10 @@ class RunnerRegistry:
     def __init__(self) -> None:
         self._runners: dict[int, WorldRunner] = {}
 
-    def get(self, world_id: int, seed: int, width: int, height: int) -> WorldRunner:
+    def get(self, world_id: int, seed: int, width: int, height: int,
+            enabled_races: list[str] | None = None) -> WorldRunner:
         if world_id not in self._runners:
-            runner = WorldRunner(world_id, seed, width, height)
+            runner = WorldRunner(world_id, seed, width, height, enabled_races)
             self._runners[world_id] = runner
         return self._runners[world_id]
 

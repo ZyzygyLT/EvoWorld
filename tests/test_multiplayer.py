@@ -12,21 +12,26 @@ from worldsim.server.db import Base
 
 @pytest.fixture()
 def fresh_db(tmp_path, monkeypatch):
-    """Fresh DB per test + fresh runner registry."""
+    """Fresh DB per test + fresh runner registry.
+
+    Single patch point: every server module resolves sessions via
+    db.SessionLocal() at call time, so rebinding it once isolates all
+    of app/resolver/league/runner from the real dev database.
+    """
     db_file = tmp_path / "test_mp.db"
     # rebuild engine/session against an isolated file DB
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    import worldsim.server.prediction_resolver as resolver
+    import worldsim.server.db as dbmod
 
     test_engine = create_engine(
         f"sqlite:///{db_file}", connect_args={"check_same_thread": False}
     )
-    session = sessionmaker(bind=test_engine)
-    appmod.SessionLocal = session
-    resolver.SessionLocal = session  # resolver reads/writes via this handle
+    dbmod.SessionLocal = sessionmaker(bind=test_engine)
     # app.py imported `registry` BY NAME at module load — rebind its view too
+    import worldsim.server.runner as runnermod
+
     runnermod.registry = runnermod.RunnerRegistry()
     appmod.registry = runnermod.registry
     Base.metadata.create_all(test_engine)

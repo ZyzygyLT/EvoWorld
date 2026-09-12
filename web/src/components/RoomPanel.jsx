@@ -6,7 +6,7 @@ const EMPTY_KINDS = {};
  * Multiplayer room: prophecy game + chat + leaderboard for one world.
  * Identity: anonymous token in localStorage.
  */
-export default function RoomPanel({ worldId, month, meta }) {
+export default function RoomPanel({ worldId, month, meta, claims = [], standings = [], tick, onClaim }) {
     const [identity, setIdentity] = useState(null);
     const [name, setName] = useState('');
     const [nameLocked, setNameLocked] = useState(false);
@@ -18,6 +18,9 @@ export default function RoomPanel({ worldId, month, meta }) {
     const [kinds, setKinds] = useState(EMPTY_KINDS);
     const [pending, setPending] = useState(null);  // {kind, params}
     const chatBoxRef = useRef(null);
+
+    const myClaim = claims.find(c => c.user_token === identity) || null;
+    const claimedIds = new Set(claims.map(c => c.kingdom_id));
 
     // identity bootstrap
     useEffect(() => {
@@ -131,14 +134,60 @@ export default function RoomPanel({ worldId, month, meta }) {
 
             {/* tabs */}
             <div style={{ display: 'flex', gap: 3, marginBottom: 4 }}>
-                {['prophecies', 'chat', 'ranks'].map(t => (
+                {['dynasty', 'prophecies', 'chat', 'ranks'].map(t => (
                     <button
                         key={t}
                         style={{ ...btn, fontSize: 11, background: tab === t ? '#2f81f7' : btn.background }}
                         onClick={() => setTab(t)}
-                    >{t === 'prophecies' ? '🔮 prophecies' : t === 'chat' ? '💬 chat' : '🏆 ranks'}</button>
+                    >{t === 'dynasty' ? '👑 dynasty' : t === 'prophecies' ? '🔮 prophecies' : t === 'chat' ? '💬 chat' : '🏆 ranks'}</button>
                 ))}
             </div>
+
+            {tab === 'dynasty' && (
+                <div style={{ flex: 1, overflowY: 'auto', minHeight: 100 }}>
+                    {myClaim ? (
+                        <div style={{ fontSize: 11, marginBottom: 4 }}>
+                            your realm: <strong style={{ color: '#f0c674' }}>
+                                {tick?.kingdoms?.find(k => k.id === myClaim.kingdom_id)?.name ?? `#${myClaim.kingdom_id}`}
+                            </strong>{' '}
+                            ({myClaim.points} pts)
+                        </div>
+                    ) : (
+                        <div style={{ fontSize: 10, color: '#8b949e', marginBottom: 4 }}>
+                            click a realm on the map, then “claim this realm” — one per oracle
+                        </div>
+                    )}
+                    {standings.map(u => {
+                        const k = tick?.kingdoms?.find(k => k.id === u.kingdom_id);
+                        return (
+                            <div key={u.user_token} style={{ fontSize: 11, display: 'flex', gap: 6, marginBottom: 2 }}>
+                                <span style={{ width: 18, color: '#f0c674' }}>#{u.rank}</span>
+                                <span style={{ flex: 1 }}>{u.user}{u.user_token === identity ? ' (you)' : ''}</span>
+                                <span style={{ color: '#8b949e' }}>{k ? k.name : ''}</span>
+                                <span>{u.points} pts</span>
+                            </div>
+                        );
+                    })}
+                    {standings.length === 0 && (
+                        <div style={{ fontSize: 10, color: '#8b949e' }}>no dynasties yet — be the first to claim</div>
+                    )}
+                    <div style={{ fontSize: 10, color: '#8b949e', marginTop: 6 }}>
+                        unclaimed realms:
+                    </div>
+                    {(tick?.kingdoms ?? []).filter(k => !claimedIds.has(k.id) && k.sites.length > 0).slice(0, 12).map(k => (
+                        <div key={k.id} style={{ fontSize: 11, display: 'flex', gap: 4, alignItems: 'center' }}>
+                            <span style={{ ...dot, background: `rgb(${k.color[0]},${k.color[1]},${k.color[2]})` }} />
+                            <span style={{ flex: 1 }}>{k.name} ({k.sites.length}s, {k.population.toLocaleString()})</span>
+                            {!myClaim && (
+                                <button style={{ ...btn, fontSize: 10, padding: '1px 5px' }}
+                                    onClick={() => onClaim && onClaim(k.id)}>
+                                    claim
+                                </button>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {tab === 'prophecies' && (
                 <div style={{ flex: 1, overflowY: 'auto', minHeight: 100 }}>
@@ -250,6 +299,14 @@ const input = {
     padding: '3px 6px',
     fontSize: 12,
     outline: 'none',
+};
+
+const dot = {
+    display: 'inline-block',
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    flexShrink: 0,
 };
 
 const panelBox = {

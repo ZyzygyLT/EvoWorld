@@ -12,7 +12,7 @@ const REL_COLORS = {
  * Floating always-visible stats panel for the selected kingdom.
  * Data comes from the live `selected_stats` WS payload (rich engine stats).
  */
-export default function StatsPanel({ stats, govDesc, onClose }) {
+export default function StatsPanel({ stats, govDesc, onClose, claimable, claimedBy, onClaim }) {
     if (!stats) return null;
     const kcolor = `rgb(${stats.color[0]},${stats.color[1]},${stats.color[2]})`;
 
@@ -22,9 +22,19 @@ export default function StatsPanel({ stats, govDesc, onClose }) {
                 <span style={{ ...dot, background: kcolor }} />
                 <strong style={{ color: kcolor }}>{stats.name}</strong>
                 {stats.golden_age && <span title="Golden Age">✨</span>}
+                {claimedBy && <span title={`claimed by ${claimedBy}`} style={{ fontSize: 13 }}>👑</span>}
                 <span style={{ flex: 1 }} />
                 <button style={closeBtn} onClick={onClose}>✕</button>
             </div>
+            {claimable && (
+                <button
+                    style={{ ...claimBtn }}
+                    onClick={() => onClaim && onClaim(stats.id)}
+                >⚽ claim this realm for the league</button>
+            )}
+            {claimedBy && !claimable && (
+                <div style={{ fontSize: 10, color: '#f0c674' }}>claimed by {claimedBy}</div>
+            )}
             <div style={sub}>{stats.race} · {stats.government}{stats.civilized ? ' (civilized)' : ''}</div>
             {govDesc && <div style={desc}>“{govDesc}”</div>}
 
@@ -174,4 +184,16 @@ const closeBtn = {
     cursor: 'pointer',
     fontSize: 14,
     padding: '0 4px',
+};
+
+const claimBtn = {
+    background: '#1f6feb',
+    border: '1px solid #388bfd',
+    color: '#fff',
+    borderRadius: 4,
+    padding: '3px 8px',
+    cursor: 'pointer',
+    fontSize: 11,
+    margin: '4px 0',
+    width: '100%',
 };

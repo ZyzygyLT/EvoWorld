@@ -106,9 +106,17 @@ class SimEngine:
         n_civilized: int = CIVILIZED_CIVS,
         n_tribal: int = TRIBAL_CIVS,
         n_beasts: int = N_BEASTS,
+        enabled_races: list[str] | None = None,
     ) -> None:
         self.world = world
-        self.races = races
+        self.races = (
+            [r for r in races if r.name in enabled_races] if enabled_races else list(races)
+        )
+        # a world needs at least one civilized + one tribal race to spawn
+        has_civ = any(r.form == "civilized" for r in self.races)
+        has_tribal = any(r.form == "tribal" for r in self.races)
+        if not has_civ or not has_tribal:
+            self.races = list(races)
         self.governments = governments
         self.rng = rng or np.random.default_rng(seed)
         self.namegen = NameGenerator(self.rng)

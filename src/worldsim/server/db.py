@@ -24,6 +24,25 @@ class WorldRow(Base):
     land_pct = Column(Float)
     state_json = Column(Text)  # full engine_to_dict snapshot
     created_at = Column(String)
+    name = Column(String, default="")
+    mode = Column(String, default="single")  # single | league
+    season_years = Column(Integer, default=300)  # league: champion at N years
+    season_over = Column(Integer, default=0)  # bool flag once the season ends
+    enabled_races_json = Column(String, default="")  # JSON list, "" = all
+
+
+class ClaimRow(Base):
+    """Dynasty League: a user claims ONE kingdom in a world."""
+
+    __tablename__ = "claims"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(Integer, ForeignKey("worlds.id"), index=True)
+    kingdom_id = Column(Integer)
+    user_token = Column(String, index=True)
+    user_name = Column(String)
+    month = Column(Integer)  # when the claim was sealed (scoring starts here)
+    points = Column(Integer, default=0)
 
 
 class PredictionRow(Base):
@@ -67,3 +86,24 @@ else:
     )
 
 SessionLocal = sessionmaker(bind=engine_db)
+
+
+def ensure_schema() -> None:
+    """Create tables + migrate old DBs (dev worlds.db predates league columns).
+
+    create_all only creates MISSING tables; SQLite has no ADD COLUMN via
+    SQLAlchemy migrations, so new columns on the `worlds` table are added
+    explicitly. Without this, any select(WorldRow) on an old DB raises
+    OperationalError (which once killed the shared runner task silently).
+    """
+    from sqlalchemy import inspect, text
+
+    Base.metadata.create_all(engine_db)
+    if engine_db.dialect.name != "sqlite":
+        return
+    existing = {c["name"] for c in inspect(engine_db).get_columns("worlds")}
+    with engine_db.begin() as conn:
+        for col in Base.metadata.tables["worlds"].columns:
+            if col.name not in existing and col.name != "id":
+                default = f" DEFAULT {col.server_default.arg}" if col.server_default else ""
+                conn.execute(text(f"ALTER TABLE worlds ADD COLUMN {col.name} {col.type}{default}"))

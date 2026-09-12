@@ -6,7 +6,7 @@ import StatsPanel from './StatsPanel.jsx';
  * Canvas world map with pan/zoom + political overlay + site markers.
  * Re-fits the camera on every world load; survives canvas resizes.
  */
-export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection }) {    const canvasRef = useRef(null);
+export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection, claims = [], worldMode = 'single', onClaim }) {    const canvasRef = useRef(null);
     const viewRef = useRef(null);   // null => needs fit
     const dragRef = useRef(null);
     const [hover, setHover] = useState('');
@@ -108,6 +108,8 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         }
 
         if (tick) {
+            const claimedBy = {};
+            for (const c of claims) claimedBy[c.kingdom_id] = c.user_name;
             // territory cells (always in political; subtle in battles)
             const terrAlpha = mapMode === 'political' ? 0.35 : (mapMode === 'battles' ? 0.15 : 0.25);
             for (const k of tick.kingdoms) {
@@ -117,8 +119,9 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                     ctx.fillRect(x + s.x * scale, y + s.y * scale, scale, scale);
                 }
             }
-            // site dots
+            // site dots (+ crown for claimed dynasties)
             for (const k of tick.kingdoms) {
+                const owner = claimedBy[k.id];
                 for (const s of k.sites) {
                     const cx = x + (s.x + 0.5) * scale;
                     const cy = y + (s.y + 0.5) * scale;
@@ -139,6 +142,17 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                         ctx.strokeText(k.name[0], cx - scale * 0.4, cy - scale * 0.8);
                         ctx.fillStyle = '#fff';
                         ctx.fillText(k.name[0], cx - scale * 0.4, cy - scale * 0.8);
+                        if (owner) {
+                            ctx.fillStyle = '#f0c674';
+                            ctx.font = `${Math.max(9, scale * 2.4)}px monospace`;
+                            ctx.fillText('👑', cx - scale * 0.4, cy + scale * 1.6);
+                        }
+                    } else if (owner && scale >= 3) {
+                        // tiny crown dot on any site of a claimed realm
+                        ctx.fillStyle = '#f0c674';
+                        ctx.beginPath();
+                        ctx.arc(cx, cy - rad - 1, Math.max(1, scale * 0.18), 0, Math.PI * 2);
+                        ctx.fill();
                     }
                 }
             }
@@ -347,6 +361,9 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                     stats={stats}
                     govDesc={govDesc}
                     onClose={onClearSelection}
+                    claimable={worldMode === 'league' && !claims.some(c => c.kingdom_id === stats.id)}
+                    claimedBy={(claims.find(c => c.kingdom_id === stats.id) || {}).user_name}
+                    onClaim={onClaim}
                 />
             )}
             {hover && (

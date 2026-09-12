@@ -36,10 +36,10 @@ from sqlalchemy import select
 
 from worldsim.data.loaders import load_governments, load_races
 from worldsim.export.state import engine_to_dict
+from worldsim.server import db
 from worldsim.server.db import (
     Base,
     ChatRow,
-    SessionLocal,
     WorldRow,
     engine_db,
 )
@@ -69,6 +69,10 @@ class CreateWorldRequest(BaseModel):
     n_civilized: int = Field(default=2, ge=0, le=8)
     n_tribal: int = Field(default=2, ge=0, le=8)
     n_beasts: int = Field(default=2, ge=0, le=8)
+    name: str = Field(default="", max_length=48)
+    mode: str = Field(default="single")  # single | league
+    season_years: int = Field(default=300, ge=12, le=2000)
+    enabled_races: list[str] | None = Field(default=None)
 
 
 class PredictionRequest(BaseModel):
@@ -85,9 +89,16 @@ class ChatRequest(BaseModel):
     text: str = Field(min_length=1, max_length=300)
 
 
+class ClaimRequest(BaseModel):
+    kingdom_id: int
+    user_token: str = Field(min_length=8, max_length=64)
+    user_name: str = Field(min_length=1, max_length=24)
+
+
 def _build_engine(
     seed: int, width: int, height: int,
     n_civilized: int = 2, n_tribal: int = 2, n_beasts: int = 2,
+    enabled_races: list[str] | None = None,
 ) -> SimEngine:
     cfg = WorldConfig(seed=seed, width=width, height=height)
     world = generate_world(cfg)
@@ -96,6 +107,7 @@ def _build_engine(
     return SimEngine(
         world, races, govs, seed=seed,
         n_civilized=n_civilized, n_tribal=n_tribal, n_beasts=n_beasts,
+        enabled_races=enabled_races,
     )
 
 
@@ -144,8 +156,8 @@ def get_meta() -> dict:
 
 @app.get("/api/worlds")
 def list_worlds() -> list[dict]:
-    with SessionLocal() as db:  # type: ignore[call-arg]
-        rows = db.scalars(
+    with db.SessionLocal() as db_:  # type: ignore[call-arg]
+        rows = db_.scalars(
             select(WorldRow).order_by(WorldRow.id.desc()).limit(50)
         ).all()
         return [
@@ -155,6 +167,10 @@ def list_worlds() -> list[dict]:
                 "months_simulated": r.months_simulated,
                 "land_pct": r.land_pct,
                 "created_at": r.created_at,
+                "name": r.name or f"World {r.seed}",
+                "mode": r.mode or "single",
+                "season_years": r.season_years or 300,
+                "season_over": bool(r.season_over),
             }
             for r in rows
         ]
@@ -163,15 +179,18 @@ def list_worlds() -> list[dict]:
 @app.post("/api/worlds")
 def create_world(req: CreateWorldRequest) -> dict:
     """Generate a world, optionally pre-simulate `months`, persist, return id+state."""
+    if req.mode not in ("single", "league"):
+        raise HTTPException(400, "mode must be 'single' or 'league'")
     eng = _build_engine(
         req.seed, req.width, req.height,
         req.n_civilized, req.n_tribal, req.n_beasts,
+        req.enabled_races,
     )
     for _ in range(req.months):
         eng.tick()
     state = engine_to_dict(eng)
 
-    with SessionLocal() as db:  # type: ignore[call-arg]
+    with db.SessionLocal() as db_:  # type: ignore[call-arg]
         row = WorldRow(
             seed=req.seed,
             width=req.width,
@@ -180,19 +199,24 @@ def create_world(req: CreateWorldRequest) -> dict:
             land_pct=float((eng.world.height > 0.2).mean() * 100),
             state_json=json.dumps(state),
             created_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+            name=req.name or f"World {req.seed}",
+            mode=req.mode,
+            season_years=req.season_years,
+            season_over=0,
+            enabled_races_json=json.dumps(req.enabled_races or []),
         )
-        db.add(row)
-        db.commit()
-        db.refresh(row)
+        db_.add(row)
+        db_.commit()
+        db_.refresh(row)
         # seed the runner so POST's engine == canonical runner engine
-        runner = registry.get(row.id, req.seed, req.width, req.height)
+        runner = registry.get(row.id, req.seed, req.width, req.height, req.enabled_races)
         runner.eng = eng
         return {"id": row.id, "state": state}
 
 
 def _load_row(world_id: int) -> WorldRow:
-    with SessionLocal() as db:  # type: ignore[call-arg]
-        row = db.get(WorldRow, world_id)
+    with db.SessionLocal() as db_:  # type: ignore[call-arg]
+        row = db_.get(WorldRow, world_id)
         if row is None:
             raise HTTPException(404, f"world {world_id} not found")
         return row
@@ -205,12 +229,12 @@ def get_world(world_id: int) -> dict:
 
 @app.delete("/api/worlds/{world_id}")
 def delete_world(world_id: int) -> dict:
-    with SessionLocal() as db:  # type: ignore[call-arg]
-        row = db.get(WorldRow, world_id)
+    with db.SessionLocal() as db_:  # type: ignore[call-arg]
+        row = db_.get(WorldRow, world_id)
         if row is None:
             raise HTTPException(404, f"world {world_id} not found")
-        db.delete(row)
-        db.commit()
+        db_.delete(row)
+        db_.commit()
         return {"deleted": world_id}
 
 
@@ -219,7 +243,11 @@ def get_kingdom_stats(world_id: int, kingdom_id: int) -> dict:
     """Rich stats for one kingdom (deterministic replay to the saved month)."""
     row = _load_row(world_id)
     state = json.loads(row.state_json)
-    eng = _build_engine(row.seed, row.width, row.height)
+    try:
+        enabled = json.loads(row.enabled_races_json or "[]") or None
+    except (json.JSONDecodeError, TypeError):
+        enabled = None
+    eng = _build_engine(row.seed, row.width, row.height, enabled_races=enabled)
     for _ in range(state["month"]):
         eng.tick()
     k = next((k for k in eng.kingdoms if k.id == kingdom_id), None)
@@ -257,8 +285,8 @@ def get_leaderboard(world_id: int) -> list[dict]:
 
 @app.get("/api/worlds/{world_id}/chat")
 def get_chat(world_id: int) -> list[dict]:
-    with SessionLocal() as db:  # type: ignore[call-arg]
-        rows = db.scalars(
+    with db.SessionLocal() as db_:  # type: ignore[call-arg]
+        rows = db_.scalars(
             select(ChatRow)
             .where(ChatRow.world_id == world_id)
             .order_by(ChatRow.id.desc())
@@ -279,7 +307,7 @@ def post_chat(world_id: int, req: ChatRequest) -> dict:
     _load_row(world_id)
     runner = registry.get_existing(world_id)
     month = runner.eng.month if runner else 0
-    with SessionLocal() as db:  # type: ignore[call-arg]
+    with db.SessionLocal() as db_:  # type: ignore[call-arg]
         row = ChatRow(
             world_id=world_id,
             user_token=req.user_token,
@@ -287,19 +315,70 @@ def post_chat(world_id: int, req: ChatRequest) -> dict:
             text=req.text,
             month=month,
         )
-        db.add(row)
-        db.commit()
+        db_.add(row)
+        db_.commit()
         msg = {"user_name": req.user_name, "text": req.text, "month": month}
     if runner:
         runner._broadcast_system(f"💬 {req.user_name}: {req.text}")
     return msg
 
 
+# -- dynasty league: claims + standings ------------------------------------------
+
+
+@app.get("/api/worlds/{world_id}/claims")
+def get_claims(world_id: int) -> list[dict]:
+    from worldsim.server.league import get_claims as _claims
+
+    _load_row(world_id)
+    return _claims(world_id)
+
+
+@app.post("/api/worlds/{world_id}/claims")
+def post_claim(world_id: int, req: ClaimRequest) -> dict:
+    from worldsim.server.league import claim_kingdom
+
+    result = claim_kingdom(
+        world_id, req.kingdom_id, req.user_token, req.user_name,
+        _canonical_month(world_id),
+    )
+    if isinstance(result, str):  # error string
+        raise HTTPException(400, result)
+    runner = registry.get_existing(world_id)
+    if runner:
+        runner._broadcast_system(
+            f"👑 {req.user_name} claimed {result.get('kingdom_name', 'a realm')}!"
+        )
+    return result
+
+
+@app.get("/api/worlds/{world_id}/standings")
+def get_standings(world_id: int) -> list[dict]:
+    from worldsim.server.league import standings
+
+    _load_row(world_id)
+    return standings(world_id)
+
+
+def _canonical_month(world_id: int) -> int:
+    """Month of the shared clock (or the saved snapshot if never streamed)."""
+    runner = registry.get_existing(world_id)
+    if runner:
+        return runner.eng.month
+    with db.SessionLocal() as db_:  # type: ignore[call-arg]
+        row = db_.get(WorldRow, world_id)
+        return row.months_simulated if row else 0
+
+
 # -- live stream ------------------------------------------------------------------
 
 
-def _tick_payload(eng: SimEngine, selected_id: int | None = None) -> dict:
-    """Compact per-month payload for the live stream."""
+def _tick_payload(eng: SimEngine) -> dict:
+    """Compact per-month payload for the shared live stream.
+
+    Per-spectator selection stats go through the private 'stats' channel
+    (see runner.WorldRunner._broadcast_tick), not through this payload.
+    """
     heat = eng.battle_heat()
     return {
         "type": "tick",
@@ -357,11 +436,6 @@ def _tick_payload(eng: SimEngine, selected_id: int | None = None) -> dict:
             {"month": e.month, "type": e.type.name, "text": e.text}
             for e in eng.chronicle.recent(12)
         ],
-        "selected_stats": (
-            eng.kingdom_stats(next(k for k in eng.kingdoms if k.id == selected_id))
-            if selected_id is not None and any(k.id == selected_id for k in eng.kingdoms)
-            else None
-        ),
     }
 
 
@@ -377,7 +451,11 @@ async def ws_world(ws: WebSocket, world_id: int) -> None:
     await ws.accept()
     try:
         row = _load_row(world_id)
-        runner = registry.get(world_id, row.seed, row.width, row.height)
+        try:
+            enabled = json.loads(row.enabled_races_json or "[]") or None
+        except (json.JSONDecodeError, TypeError):
+            enabled = None
+        runner = registry.get(world_id, row.seed, row.width, row.height, enabled)
         # fast-forward the shared engine to the saved month on first attach
         if runner.eng.month == 0 and row.months_simulated > 0:
             for _ in range(row.months_simulated):
@@ -387,7 +465,7 @@ async def ws_world(ws: WebSocket, world_id: int) -> None:
 
         selected_id: int | None = None
         # send an immediate snapshot so the client doesn't wait 0.5s
-        await ws.send_text(json.dumps(_tick_payload(runner.eng, selected_id)))
+        await ws.send_text(json.dumps(_tick_payload(runner.eng)))
 
         while True:
             try:
@@ -400,9 +478,19 @@ async def ws_world(ws: WebSocket, world_id: int) -> None:
                     selected_id = (
                         int(msg["selected"]) if msg["selected"] is not None else None
                     )
-                    await ws.send_text(
-                        json.dumps(_tick_payload(runner.eng, selected_id))
-                    )
+                    runner.set_selected(ws, selected_id)
+                    if selected_id is None:
+                        await ws.send_text(json.dumps({"type": "stats", "stats": None}))
+                    else:
+                        k = next(
+                            (k for k in runner.eng.kingdoms if k.id == selected_id), None
+                        )
+                        if k is not None:
+                            await ws.send_text(
+                                json.dumps(
+                                    {"type": "stats", "stats": runner.eng.kingdom_stats(k)}
+                                )
+                            )
             except TimeoutError:
                 pass
             await asyncio.sleep(0.1)

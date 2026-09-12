@@ -6,7 +6,8 @@ import json
 
 from sqlalchemy import select
 
-from worldsim.server.db import PredictionRow, SessionLocal
+from worldsim.server import db
+from worldsim.server.db import PredictionRow
 from worldsim.sim.engine import ERA_NAMES, SimEngine
 from worldsim.sim.models import EventType
 
@@ -74,10 +75,10 @@ def create_prediction(
         deadline_months=spec["deadline"],
         status="pending",
     )
-    with SessionLocal() as db:  # type: ignore[call-arg]
-        db.add(row)
-        db.commit()
-        db.refresh(row)
+    with db.SessionLocal() as db_:  # type: ignore[call-arg]
+        db_.add(row)
+        db_.commit()
+        db_.refresh(row)
         return _row_dict(row)
 
 
@@ -99,8 +100,8 @@ def _row_dict(r: PredictionRow) -> dict:
 
 
 def list_predictions(world_id: int) -> list[dict]:
-    with SessionLocal() as db:  # type: ignore[call-arg]
-        rows = db.scalars(
+    with db.SessionLocal() as db_:  # type: ignore[call-arg]
+        rows = db_.scalars(
             select(PredictionRow)
             .where(PredictionRow.world_id == world_id)
             .order_by(PredictionRow.id.desc())
@@ -230,13 +231,13 @@ def resolve_pending(world_id: int, eng: SimEngine) -> list[dict]:
         if status is None:
             continue
         points = KINDS[p["kind"]]["points"] if status == "won" else 0
-        with SessionLocal() as db:  # type: ignore[call-arg]
-            row = db.get(PredictionRow, p["id"])
+        with db.SessionLocal() as db_:  # type: ignore[call-arg]
+            row = db_.get(PredictionRow, p["id"])
             row.status = status
             row.points = points
             row.resolved_month = eng.month
             row.resolved_text = text
-            db.commit()
+            db_.commit()
         p.update(
             status=status, points=points, resolved_month=eng.month, resolved_text=text
         )
