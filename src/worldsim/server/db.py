@@ -29,6 +29,7 @@ class WorldRow(Base):
     season_years = Column(Integer, default=300)  # league: champion at N years
     season_over = Column(Integer, default=0)  # bool flag once the season ends
     enabled_races_json = Column(String, default="")  # JSON list, "" = all
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
 
 class ClaimRow(Base):
@@ -43,6 +44,7 @@ class ClaimRow(Base):
     user_name = Column(String)
     month = Column(Integer)  # when the claim was sealed (scoring starts here)
     points = Column(Integer, default=0)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
 
 class PredictionRow(Base):
@@ -73,6 +75,23 @@ class ChatRow(Base):
     month = Column(Integer)  # in-world month when it was said
 
 
+class UserRow(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String, unique=True, index=True)
+    pw_hash = Column(String)  # pbkdf2-sha256(salt, password), hex
+    created_at = Column(String)
+
+
+class SessionRow(Base):
+    __tablename__ = "sessions"
+
+    token = Column(String, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    created_at = Column(String)
+
+
 # Persistence: sqlite by default; set WORLDSIM_DB to any SQLAlchemy URL to
 # switch (e.g. postgresql+psycopg://user:pass@host/worldsim for PostgreSQL).
 _DB_URL = os.environ.get("WORLDSIM_DB")
@@ -92,8 +111,8 @@ def ensure_schema() -> None:
     """Create tables + migrate old DBs (dev worlds.db predates league columns).
 
     create_all only creates MISSING tables; SQLite has no ADD COLUMN via
-    SQLAlchemy migrations, so new columns on the `worlds` table are added
-    explicitly. Without this, any select(WorldRow) on an old DB raises
+    SQLAlchemy migrations, so new columns on existing tables are added
+    explicitly. Without this, any select on an old DB raises
     OperationalError (which once killed the shared runner task silently).
     """
     from sqlalchemy import inspect, text
@@ -101,12 +120,18 @@ def ensure_schema() -> None:
     Base.metadata.create_all(engine_db)
     if engine_db.dialect.name != "sqlite":
         return
-    existing = {c["name"] for c in inspect(engine_db).get_columns("worlds")}
+    insp = inspect(engine_db)
     with engine_db.begin() as conn:
-        for col in Base.metadata.tables["worlds"].columns:
-            if col.name not in existing and col.name != "id":
-                default = f" DEFAULT {col.server_default.arg}" if col.server_default else ""
-                conn.execute(text(f"ALTER TABLE worlds ADD COLUMN {col.name} {col.type}{default}"))
+        for table_name, table in Base.metadata.tables.items():
+            if table_name not in insp.get_table_names():
+                continue
+            existing = {c["name"] for c in insp.get_columns(table_name)}
+            for col in table.columns:
+                if col.name not in existing and col.name != "id":
+                    default = f" DEFAULT {col.server_default.arg}" if col.server_default else ""
+                    conn.execute(
+                        text(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col.type}{default}")
+                    )
 
 
 ensure_schema()  # migrate old dev DBs in place (ADD COLUMN is idempotent-safe)

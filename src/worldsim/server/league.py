@@ -67,7 +67,8 @@ def get_claims(world_id: int) -> list[dict]:
 
 
 def claim_kingdom(
-    world_id: int, kingdom_id: int, user_token: str, user_name: str, month: int
+    world_id: int, kingdom_id: int, user_token: str, user_name: str, month: int,
+    user_id: int | None = None,
 ) -> dict | str:
     """Claim a free kingdom (one per user per world). Returns payload or error."""
     with _session() as db:
@@ -102,6 +103,7 @@ def claim_kingdom(
             user_name=user_name,
             month=month,
             points=0,
+            user_id=user_id,
         )
         db.add(row)
         db.commit()

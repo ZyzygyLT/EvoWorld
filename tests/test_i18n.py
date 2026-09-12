@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from worldsim.i18n import DEFAULT_LANG, SUPPORTED, render, vocab
-from worldsim.sim.models import EventType
 
 
 def test_every_event_type_has_templates():
@@ -35,9 +34,11 @@ def test_spanish_renders_without_placeholders():
     cases = [
         ("war_declared", {"war": "W", "a": "A", "b": "B", "cause_key": "disputed", "site": "S"}),
         ("war_declared", {"war": "W", "a": "A", "b": "B", "cause_key": "border", "site": ""}),
-        ("government_changed", {"kingdom": "K", "old": "X", "government": "Y", "reason_key": "golden_age"}),
+        ("government_changed", {"kingdom": "K", "old": "X", "government": "Y",
+                                "reason_key": "golden_age"}),
         ("battle_champion", {"winner": "A", "loser": "B", "dead": 5, "champion": "C"}),
-        ("leader_died", {"title": "King", "leader": "L", "kingdom": "K", "age": 40, "victories": 3}),
+        ("leader_died", {"title": "King", "leader": "L", "kingdom": "K",
+                         "age": 40, "victories": 3}),
         ("rebellion", {"n": 4, "kingdom": "K", "new_kingdom": "N", "title": "Chief", "leader": "L"}),
     ]
     for key, params in cases:

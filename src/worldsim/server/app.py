@@ -30,7 +30,7 @@ import secrets
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -95,6 +95,62 @@ class ClaimRequest(BaseModel):
     user_name: str = Field(min_length=1, max_length=24)
 
 
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=24)
+    password: str = Field(min_length=4, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+def _auth_user(authorization: str | None):
+    """Resolve 'Bearer <token>' to a user row (None = anonymous)."""
+    from worldsim.server import auth as authmod
+
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    return authmod.user_from_token(authorization[7:].strip())
+
+
+@app.post("/api/auth/register")
+def api_register(req: RegisterRequest) -> dict:
+    from worldsim.server import auth as authmod
+
+    result = authmod.register(req.username, req.password)
+    if isinstance(result, str):
+        raise HTTPException(400, result)
+    return result
+
+
+@app.post("/api/auth/login")
+def api_login(req: LoginRequest) -> dict:
+    from worldsim.server import auth as authmod
+
+    result = authmod.login(req.username, req.password)
+    if isinstance(result, str):
+        raise HTTPException(401, result)
+    return result
+
+
+@app.get("/api/auth/me")
+def api_me(authorization: str | None = Header(default=None)) -> dict:
+    user = _auth_user(authorization)
+    if user is None:
+        raise HTTPException(401, "not logged in")
+    return {"username": user.username, "user_id": user.id}
+
+
+@app.post("/api/auth/logout")
+def api_logout(authorization: str | None = Header(default=None)) -> dict:
+    from worldsim.server import auth as authmod
+
+    if authorization and authorization.startswith("Bearer "):
+        authmod.logout(authorization[7:].strip())
+    return {"ok": True}
+
+
 def _build_engine(
     seed: int, width: int, height: int,
     n_civilized: int = 2, n_tribal: int = 2, n_beasts: int = 2,
@@ -155,11 +211,21 @@ def get_meta() -> dict:
 
 
 @app.get("/api/worlds")
-def list_worlds() -> list[dict]:
+def list_worlds(
+    mine: bool = False,
+    authorization: str | None = Header(default=None),
+) -> list[dict]:
+    owner_id = None
+    if mine:
+        user = _auth_user(authorization)
+        if user is None:
+            raise HTTPException(401, "log in to list your worlds")
+        owner_id = user.id
     with db.SessionLocal() as db_:  # type: ignore[call-arg]
-        rows = db_.scalars(
-            select(WorldRow).order_by(WorldRow.id.desc()).limit(50)
-        ).all()
+        q = select(WorldRow).order_by(WorldRow.id.desc()).limit(50)
+        if owner_id is not None:
+            q = q.where(WorldRow.owner_user_id == owner_id)
+        rows = db_.scalars(q).all()
         return [
             {
                 "id": r.id,
@@ -171,16 +237,21 @@ def list_worlds() -> list[dict]:
                 "mode": r.mode or "single",
                 "season_years": r.season_years or 300,
                 "season_over": bool(r.season_over),
+                "mine": owner_id is not None and r.owner_user_id == owner_id,
             }
             for r in rows
         ]
 
 
 @app.post("/api/worlds")
-def create_world(req: CreateWorldRequest) -> dict:
+def create_world(
+    req: CreateWorldRequest,
+    authorization: str | None = Header(default=None),
+) -> dict:
     """Generate a world, optionally pre-simulate `months`, persist, return id+state."""
     if req.mode not in ("single", "league"):
         raise HTTPException(400, "mode must be 'single' or 'league'")
+    owner = _auth_user(authorization)
     eng = _build_engine(
         req.seed, req.width, req.height,
         req.n_civilized, req.n_tribal, req.n_beasts,
@@ -204,6 +275,7 @@ def create_world(req: CreateWorldRequest) -> dict:
             season_years=req.season_years,
             season_over=0,
             enabled_races_json=json.dumps(req.enabled_races or []),
+            owner_user_id=owner.id if owner else None,
         )
         db_.add(row)
         db_.commit()
@@ -335,12 +407,17 @@ def get_claims(world_id: int) -> list[dict]:
 
 
 @app.post("/api/worlds/{world_id}/claims")
-def post_claim(world_id: int, req: ClaimRequest) -> dict:
+def post_claim(
+    world_id: int, req: ClaimRequest,
+    authorization: str | None = Header(default=None),
+) -> dict:
     from worldsim.server.league import claim_kingdom
 
+    user = _auth_user(authorization)
     result = claim_kingdom(
         world_id, req.kingdom_id, req.user_token, req.user_name,
         _canonical_month(world_id),
+        user_id=user.id if user else None,
     )
     if isinstance(result, str):  # error string
         raise HTTPException(400, result)

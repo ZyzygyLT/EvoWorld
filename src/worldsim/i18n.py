@@ -17,7 +17,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "leader_crowned": "{leader} becomes {title} of {kingdom}.",
         "merchant_rose": "{name} the merchant rose to prominence in {kingdom}.",
         "warlord_rose": "{name} the warlord took command of {kingdom}'s hosts.",
-        "leader_died": "{title} {leader} of {kingdom} died at age {age} after {victories} victories.",
+        "leader_died": "{title} {leader} of {kingdom} died at age {age} after"
+            "{victories} victories.",
         "hero_emerged": "The champion {hero} rises in {kingdom} (battle strength x{strength}).",
         "hero_fell": "The champion {hero} of {kingdom} fell in battle after {deeds} deeds.",
         "beast_slain": "Hunters of {kingdom} slew the monster {beast} near {site}.",
@@ -31,16 +32,20 @@ STRINGS: dict[str, dict[str, str]] = {
         "war_won": "{victor} won {war} ({dead} dead over {months} months).",
         "war_ended": "{war} ended.",
         "battle": "{winner} defeated {loser} in battle ({dead} dead).",
-        "battle_champion": "{winner} defeated {loser} in battle ({dead} dead) — champion {champion} led the charge!",
+        "battle_champion": "{winner} defeated {loser} in battle ({dead} dead) — champion"
+            "{champion} led the charge!",
         "site_captured": "{winner} captured {site} from {loser}.",
         "site_razed": "{winner} razed {site} — {loser} lost the settlement.",
         "kingdom_collapsed": "{kingdom} has collapsed and is no more.",
-        "rebellion": "{n} settlements of {kingdom} rose up and founded {new_kingdom} under {title} {leader}!",
+        "rebellion": "{n} settlements of {kingdom} rose up and founded {new_kingdom}"
+            "under {title} {leader}!",
         "tech_era": "{kingdom} entered the {era}.",
-        "government_civilized": "{kingdom} left behind the old {old} ways and formed a {government} as the {era} dawned.",
+        "government_civilized": "{kingdom} left behind the old {old} ways and formed a"
+            "{government} as the {era} dawned.",
         "golden_age": "A golden age dawns upon {kingdom} — its cities flourish.",
         "plague": "A terrible plague ravaged {kingdom} — {dead} souls perished.",
-        "independence": "The distant colony {site} declared independence from {kingdom}, founding {new_kingdom}!",
+        "independence": "The distant colony {site} declared independence from"
+            "{kingdom}, founding {new_kingdom}!",
         "colony_founded": "{kingdom} founded the colony {site} in distant lands.",
         "government_changed": "{kingdom} shifted from {old} to {government} {reason}.",
         "milestone_first_city": "★ {kingdom} raised the world's first City: {site}.",
@@ -57,7 +62,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "leader_crowned": "{leader} se convierte en {title} de {kingdom}.",
         "merchant_rose": "El mercader {name} ganó prominencia en {kingdom}.",
         "warlord_rose": "{name} el caudillo tomó el mando de las huestes de {kingdom}.",
-        "leader_died": "{title} {leader} de {kingdom} murió a los {age} años tras {victories} victorias.",
+        "leader_died": "{title} {leader} de {kingdom} murió a los {age} años tras"
+            "{victories} victorias.",
         "hero_emerged": "El campeón {hero} se alza en {kingdom} (fuerza de batalla x{strength}).",
         "hero_fell": "El campeón {hero} de {kingdom} cayó en batalla tras {deeds} hazañas.",
         "beast_slain": "Cazadores de {kingdom} mataron al monstruo {beast} cerca de {site}.",
@@ -71,23 +77,28 @@ STRINGS: dict[str, dict[str, str]] = {
         "war_won": "{victor} ganó {war} ({dead} muertos en {months} meses).",
         "war_ended": "{war} terminó.",
         "battle": "{winner} derrotó a {loser} en batalla ({dead} muertos).",
-        "battle_champion": "¡{winner} derrotó a {loser} en batalla ({dead} muertos) — el campeón {champion} lideró la carga!",
+        "battle_champion": "¡{winner} derrotó a {loser} en batalla ({dead} muertos) — el"
+            "campeón {champion} lideró la carga!",
         "site_captured": "{winner} capturó {site} de {loser}.",
         "site_razed": "{winner} arrasó {site} — {loser} perdió el asentamiento.",
         "kingdom_collapsed": "{kingdom} ha colapsado y ya no existe.",
-        "rebellion": "¡{n} asentamientos de {kingdom} se rebelaron y fundaron {new_kingdom} bajo {title} {leader}!",
+        "rebellion": "¡{n} asentamientos de {kingdom} se rebelaron y fundaron"
+            "{new_kingdom} bajo {title} {leader}!",
         "tech_era": "{kingdom} entró en {era}.",
-        "government_civilized": "{kingdom} dejó atrás las viejas costumbres de {old} y formó {government} al amanecer {era}.",
+        "government_civilized": "{kingdom} dejó atrás las viejas costumbres de {old} y formó"
+            "{government} al amanecer {era}.",
         "golden_age": "Una edad dorada amanece sobre {kingdom} — sus ciudades florecen.",
         "plague": "Una terrible plaga arrasó {kingdom} — {dead} almas perecieron.",
-        "independence": "¡La lejana colonia {site} declaró su independencia de {kingdom}, fundando {new_kingdom}!",
+        "independence": "¡La lejana colonia {site} declaró su independencia de"
+            "{kingdom}, fundando {new_kingdom}!",
         "colony_founded": "{kingdom} fundó la colonia {site} en tierras distantes.",
         "government_changed": "{kingdom} cambió de {old} a {government} {reason}.",
         "milestone_first_city": "★ {kingdom} alzó la primera Ciudad del mundo: {site}.",
         "milestone_first_battle": "★ Se libró la primera batalla de la historia.",
         "milestone_first_hero": "★ El primer campeón de la historia, {hero}, camina la tierra.",
         "milestone_first_beast_slain": "★ Un monstruo fue asesinado por primera vez.",
-        "milestone_first_empire": "★ {kingdom} se convirtió en el primer reino con {n} asentamientos.",
+        "milestone_first_empire": "★ {kingdom} se convirtió en el primer reino con {n}"
+            "asentamientos.",
         "milestone_ten_thousand": "★ {kingdom} fue el primer reino en alcanzar 10.000 almas.",
         "milestone_century": "★ Ha pasado un siglo completo de historia registrada.",
     },
