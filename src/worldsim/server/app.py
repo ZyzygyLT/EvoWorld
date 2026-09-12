@@ -51,6 +51,7 @@ from worldsim.server.prediction_resolver import (
 )
 from worldsim.server.runner import registry
 from worldsim.sim.engine import SimEngine
+from worldsim.sim.models import EventType
 from worldsim.worldgen import WorldConfig
 from worldsim.worldgen.pipeline import generate_world
 
@@ -497,6 +498,7 @@ def _tick_payload(eng: SimEngine) -> dict:
                 "population_history": [int(p) for p in k.population_history],
                 "tech_level": k.tech_level,
                 "golden_age": k.golden_age_until > eng.month,
+                "founded_month": k.founded_month,
             }
             for k in eng.kingdoms
         ],
@@ -522,6 +524,21 @@ def _tick_payload(eng: SimEngine) -> dict:
              "msg_key": e.msg_key, "params": e.params}
             for e in eng.chronicle.recent(12)
         ],
+        # full milestone timeline for the Hitos tab (rare by design)
+        "milestones": [
+            {"month": e.month, "type": e.type.name, "text": e.text,
+             "msg_key": e.msg_key, "params": e.params}
+            for e in eng.chronicle.events
+            if e.type == EventType.MILESTONE
+        ],
+        # recent finished wars for records (longest war etc.)
+        "wars_recent": [
+            {"name": w.name, "a": w.side_a.name, "b": w.side_b.name,
+             "battles": w.battles, "dead": w.total_dead,
+             "victor": w.victor.name if w.victor else None,
+             "start_month": w.start_month, "end_month": w.end_month}
+            for w in eng.wars if w.is_over
+        ][-10:],
     }
 
 

@@ -211,6 +211,7 @@ class SimEngine:
         k.sites.append(site)
         self._crown_leader(k)
         self._appoint_notable(k, "shaman")
+        k.founded_month = self.month
         self.kingdoms.append(k)
         self._occupancy[y, x] = k.id + 1
         # totals must be valid from month 0 (fresh paused worlds show real pops)
@@ -1045,6 +1046,7 @@ class SimEngine:
             new_k.total_population = sum(s.population for s in new_k.sites)
             k.total_population = sum(s.population for s in k.sites)
             self._crown_leader(new_k)
+            new_k.founded_month = self.month
             self.kingdoms.append(new_k)
             self._ev(
                 EventType.REBELLION, "rebellion",
@@ -1217,6 +1219,7 @@ class SimEngine:
                 self._occupancy[site.y, site.x] = new_k.id + 1
                 self._crown_leader(new_k)
                 new_k.total_population = site.population
+                new_k.founded_month = self.month
                 self.kingdoms.append(new_k)
                 self._ev(
                     EventType.INDEPENDENCE, "independence",

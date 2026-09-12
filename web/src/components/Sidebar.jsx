@@ -1,9 +1,10 @@
 import React from 'react';
 import RoomPanel from './RoomPanel.jsx';
+import { renderEvent, t, vocab } from '../i18n.js';
 
 /** Right sidebar: kingdoms list, ongoing wars, chronicle feed with filters.
  * (Per-kingdom stats live in the floating StatsPanel over the map.) */
-export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect, worldId, worldMode, claims, standings, onClaim }) {
+export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect, worldId, worldMode, claims, standings, onClaim, lang = 'es' }) {
     const [showKingdoms, setShowKingdoms] = React.useState(true);
     const [showRoom, setShowRoom] = React.useState(false);
     if (!tick) return <aside style={aside}>waiting for simulation…</aside>;
@@ -47,16 +48,16 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                                 {k.at_war ? '⚔ ' : ''}{k.name}
                             </div>
                             <div style={{ fontSize: 11, color: '#8b949e' }}>
-                                {k.race} · {k.government}{k.golden_age ? ' ✨' : ''}
+                                {vocab(lang, k.race)} · {vocab(lang, k.government)}{k.golden_age ? ' ✨' : ''}
                             </div>
                             {k.tech_level !== undefined && (
                                 <div style={{ fontSize: 10, color: '#8b949e' }}>
-                                    era {k.tech_level} · pop {k.population.toLocaleString()} · {k.sites.length}s
+                                    {vocab(lang, ['Stone Age', 'Bronze Age', 'Iron Age', 'Classical Era', 'Medieval Era'][k.tech_level] ?? '')} · pop {k.population.toLocaleString()} · {k.sites.length}s
                                 </div>
                             )}
                             {k.leader && (
                                 <div style={{ fontSize: 11 }}>
-                                    {k.leader.title} {k.leader.name} ({k.leader.reign_years}y)
+                                    {vocab(lang, k.leader.title)} {k.leader.name} ({k.leader.reign_years}y)
                                     {k.hero && <span style={{ color: '#f0c674' }}> · champion {k.hero.name}</span>}
                                 </div>
                             )}
@@ -84,7 +85,10 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
             )}
 
             {/* chronicle: guaranteed space + internal scroll + auto-scroll */}
-            <ChronicleFeed events={tick.events} />
+            <ChronicleFeed events={tick.events} lang={lang} />
+
+            {/* hitos: world-firsts timeline + auto-computed records */}
+            <HitosPanel tick={tick} lang={lang} />
 
             {/* multiplayer room (prophecies + chat + ranks), collapsible */}
             <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
@@ -102,7 +106,7 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
 }
 
 /** Chronicle feed with type filters, milestone highlighting, auto-scroll. */
-function ChronicleFeed({ events }) {
+function ChronicleFeed({ events, lang }) {
     const [filter, setFilter] = React.useState('ALL');
     const boxRef = React.useRef(null);
     const [autoScroll, setAutoScroll] = React.useState(true);
@@ -128,7 +132,7 @@ function ChronicleFeed({ events }) {
     return (
         <>
             <div style={{ ...sectionTitle, display: 'flex', alignItems: 'center' }}>
-                Chronicle
+                {t(lang, 'chronicle')}
                 <span style={{ flex: 1 }} />
                 <span style={{ fontSize: 9, color: autoScroll ? '#58a6ff' : '#8b949e' }}>
                     {autoScroll ? 'auto ▼' : '▲'}
@@ -166,12 +170,94 @@ function ChronicleFeed({ events }) {
                         }}
                     >
                         <span style={{ color: '#58a6ff' }}>[y{Math.floor(e.month / 12)}]</span>{' '}
-                        {e.text}
+                        {renderEvent(lang, e)}
                     </div>
                 ))}
             </div>
         </>
     );
+}
+
+/** Hitos: world-firsts timeline + auto-computed world records. */
+function HitosPanel({ tick, lang }) {
+    const [open, setOpen] = React.useState(false);
+    const milestones = tick.milestones ?? [];
+    const records = React.useMemo(() => computeRecords(tick), [tick]);
+    return (
+        <>
+            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                <button
+                    style={{ ...btn, fontSize: 11, flex: 1 }}
+                    onClick={() => setOpen(o => !o)}
+                >{open ? '▾' : '▸'} {t(lang, 'milestones')} ({milestones.length})</button>
+            </div>
+            {open && (
+                <div style={{ maxHeight: 300, overflowY: 'auto', marginTop: 4 }}>
+                    {milestones.slice().reverse().map((e, i) => (
+                        <div key={i} style={{ fontSize: 11, marginBottom: 3, color: '#f0c674' }}>
+                            <span style={{ color: '#58a6ff' }}>[y{Math.floor(e.month / 12)}]</span>{' '}
+                            {renderEvent(lang, e)}
+                        </div>
+                    ))}
+                    {records.length > 0 && (
+                        <>
+                            <div style={{ ...sectionTitle, fontSize: 11 }}>{t(lang, 'records')}</div>
+                            {records.map((r, i) => (
+                                <div key={i} style={{ fontSize: 11, marginBottom: 2 }}>
+                                    <span style={{ color: '#d2a8ff' }}>{r.icon} {r.label}:</span>{' '}
+                                    {r.value}
+                                </div>
+                            ))}
+                        </>
+                    )}
+                </div>
+            )}
+        </>
+    );
+}
+
+function computeRecords(tick) {
+    const out = [];
+    if (!tick?.kingdoms?.length) return out;
+    // largest city
+    let city = null;
+    for (const k of tick.kingdoms) {
+        for (const s of k.sites ?? []) {
+            if (!city || s.population > city.pop) city = { name: s.name, pop: s.population, k: k.name };
+        }
+    }
+    if (city) out.push({ icon: '🏙', label: 'city', value: `${city.name} (${city.k}) — ${Math.floor(city.pop).toLocaleString()}` });
+    // bloodiest battle spot (live heat cells)
+    const cells = tick.battle_heat?.cells ?? [];
+    if (cells.length) {
+        const top = cells.reduce((a, b) => (b.v > a.v ? b : a), cells[0]);
+        out.push({ icon: '🩸', label: 'battle', value: `(${top.x},${top.y}) — ${Math.floor(top.v).toLocaleString()} dead` });
+    }
+    // longest war (finished recent + ongoing)
+    const wars = [...(tick.wars_recent ?? []), ...(tick.wars_ongoing ?? []).map(w => ({ ...w, battles: w.battles }))];
+    if (wars.length) {
+        const top = wars.reduce((a, b) => ((b.battles ?? 0) > (a.battles ?? 0) ? b : a), wars[0]);
+        out.push({ icon: '⚔', label: 'war', value: `${top.name} — ${top.battles ?? 0} battles` });
+    }
+    // longest reign among living leaders
+    let reign = null;
+    for (const k of tick.kingdoms) {
+        if (k.leader && (!reign || k.leader.reign_years > reign.years)) {
+            reign = { name: `${k.leader.title} ${k.leader.name}`, years: k.leader.reign_years, k: k.name };
+        }
+    }
+    if (reign) out.push({ icon: '👑', label: 'reign', value: `${reign.name} (${reign.k}) — ${reign.years}y` });
+    // largest empire
+    const empire = tick.kingdoms.reduce((a, b) => ((b.sites?.length ?? 0) > (a.sites?.length ?? 0) ? b : a));
+    if (empire) out.push({ icon: '🗺', label: 'empire', value: `${empire.name} — ${empire.sites?.length ?? 0} sites` });
+    // oldest realm
+    const aged = tick.kingdoms.filter(k => k.founded_month !== undefined);
+    if (aged.length) {
+        const oldest = aged.reduce((a, b) => (a.founded_month < b.founded_month ? a : b));
+        const y = Math.floor((tick.month - oldest.founded_month) / 12);
+        out.push({ icon: '🏛', label: 'realm', value: `${oldest.name} — ${y}y old` });
+    }
+    return out;
 }
 
 /** Inline SVG population history chart for a kingdom. */

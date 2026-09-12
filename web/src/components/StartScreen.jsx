@@ -1,10 +1,11 @@
 import React from 'react';
+import { t, vocab } from '../i18n.js';
 
 /**
  * Start screen: pick single player or a dynasty-league room,
  * then configure the world (seed, size, composition, races, era head start).
  */
-export default function StartScreen({ worlds, meta, busy, onCreate, onOpen }) {
+export default function StartScreen({ worlds, meta, busy, onCreate, onOpen, lang = 'es', user = null, showMine = false, onToggleMine }) {
     const [mode, setMode] = React.useState('single');  // single | league
     const [seed, setSeed] = React.useState(() => String(Math.floor(Math.random() * 99999)));
     const [size, setSize] = React.useState('medium');
@@ -15,11 +16,19 @@ export default function StartScreen({ worlds, meta, busy, onCreate, onOpen }) {
     const [headStartYears, setHeadStartYears] = React.useState(0);
     const [seasonYears, setSeasonYears] = React.useState(300);
     const [worldName, setWorldName] = React.useState('');
+    const [mapStyle, setMapStyle] = React.useState('normal');  // normal | pangea | archipelago
 
     const SIZES = {
         small: { label: 'Small 120×60', width: 120, height: 60 },
         medium: { label: 'Medium 200×80', width: 200, height: 80 },
         large: { label: 'Large 320×128', width: 320, height: 128 },
+    };
+
+    // sea level presets: lower sea = single supercontinent, higher = islands
+    const MAP_STYLES = {
+        normal: { label: lang === 'es' ? 'Normal' : 'Normal', sea_level: 0.2 },
+        pangea: { label: lang === 'es' ? 'Pangea (un continente)' : 'Pangea (one continent)', sea_level: 0.12 },
+        archipelago: { label: lang === 'es' ? 'Archipiélago (islas)' : 'Archipelago (islands)', sea_level: 0.32 },
     };
 
     const toggleRace = (name) => {
@@ -46,8 +55,12 @@ export default function StartScreen({ worlds, meta, busy, onCreate, onOpen }) {
             mode,
             season_years: seasonYears,
             enabled_races: races,
+            sea_level: MAP_STYLES[mapStyle].sea_level,
         });
     };
+
+    const L = (k) => t(lang, k);
+    const V = (w) => vocab(lang, w);
 
     return (
         <div style={wrap}>
@@ -58,8 +71,12 @@ export default function StartScreen({ worlds, meta, busy, onCreate, onOpen }) {
 
             <div style={{ display: 'flex', gap: 12, margin: '12px 0' }}>
                 {[
-                    { id: 'single', title: '👁 Single player', desc: 'Observe the simulation. Pause, rewind the clock, inspect every realm.' },
-                    { id: 'league', title: '👑 Dynasty League', desc: 'Claim a kingdom. Its chronicle scores YOUR points. Champion at the season end.' },
+                    { id: 'single', title: L('single'), desc: lang === 'es'
+                        ? 'Observa la simulación. Pausa, mira el reloj, inspecciona cada reino.'
+                        : 'Observe the simulation. Pause, rewind the clock, inspect every realm.' },
+                    { id: 'league', title: L('league'), desc: lang === 'es'
+                        ? 'Reclama un reino. Su crónica puntúa TUS puntos. Campeón al final.'
+                        : 'Claim a kingdom. Its chronicle scores YOUR points. Champion at the end.' },
                 ].map(m => (
                     <button
                         key={m.id}
@@ -98,6 +115,10 @@ export default function StartScreen({ worlds, meta, busy, onCreate, onOpen }) {
                 <label style={lbl}>Start in year
                     <input style={{ ...input, width: 64 }} type="number" min={0} max={1000} value={headStartYears}
                         onChange={e => setHeadStartYears(Math.max(0, Math.min(1000, +e.target.value || 0)))} /></label>
+                <label style={lbl}>Map style
+                    <select style={input} value={mapStyle} onChange={e => setMapStyle(e.target.value)}>
+                        {Object.entries(MAP_STYLES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                    </select></label>
                 {mode === 'league' && (
                     <label style={lbl}>Season ends at year
                         <input style={{ ...input, width: 64 }} type="number" min={12} max={2000} value={seasonYears}
@@ -106,7 +127,9 @@ export default function StartScreen({ worlds, meta, busy, onCreate, onOpen }) {
             </div>
 
             <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 11, color: '#8b949e', marginBottom: 4 }}>races in this world</div>
+                <div style={{ fontSize: 11, color: '#8b949e', marginBottom: 4 }}>
+                    {lang === 'es' ? 'razas en este mundo' : 'races in this world'}
+                </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {(meta?.races ?? []).map(r => {
                         const on = races === null || races.includes(r.name);
@@ -115,7 +138,7 @@ export default function StartScreen({ worlds, meta, busy, onCreate, onOpen }) {
                                 style={{ ...btn, fontSize: 11, background: on ? '#1f6feb' : btn.background, opacity: on ? 1 : 0.55 }}
                                 onClick={() => toggleRace(r.name)}
                                 title={`${r.form} · strength ${r.strength}`}>
-                                {r.name}
+                                {V(r.name)}
                             </button>
                         );
                     })}
@@ -128,7 +151,16 @@ export default function StartScreen({ worlds, meta, busy, onCreate, onOpen }) {
 
             {worlds.length > 0 && (
                 <div style={{ marginTop: 22, width: '100%', maxWidth: 640 }}>
-                    <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 6 }}>saved worlds</div>
+                    <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span>{lang === 'es' ? 'mundos guardados' : 'saved worlds'}</span>
+                        {user && (
+                            <button
+                                style={{ ...btn, fontSize: 11, background: showMine ? '#2f81f7' : btn.background }}
+                                onClick={onToggleMine}>
+                                {L('myWorlds')}
+                            </button>
+                        )}
+                    </div>
                     {worlds.map(w => (
                         <button key={w.id} style={{ ...btn, fontSize: 12, margin: '0 6px 6px 0' }}
                             onClick={() => onOpen(w.id)}

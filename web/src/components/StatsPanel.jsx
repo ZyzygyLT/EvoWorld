@@ -1,4 +1,5 @@
 import React from 'react';
+import { vocab } from '../i18n.js';
 
 const ERAS = ['Stone Age', 'Bronze Age', 'Iron Age', 'Classical', 'Medieval'];
 const REL_COLORS = {
@@ -12,7 +13,7 @@ const REL_COLORS = {
  * Floating always-visible stats panel for the selected kingdom.
  * Data comes from the live `selected_stats` WS payload (rich engine stats).
  */
-export default function StatsPanel({ stats, govDesc, onClose, claimable, claimedBy, onClaim }) {
+export default function StatsPanel({ stats, govDesc, onClose, claimable, claimedBy, onClaim, lang = 'es' }) {
     if (!stats) return null;
     const kcolor = `rgb(${stats.color[0]},${stats.color[1]},${stats.color[2]})`;
 
@@ -35,7 +36,7 @@ export default function StatsPanel({ stats, govDesc, onClose, claimable, claimed
             {claimedBy && !claimable && (
                 <div style={{ fontSize: 10, color: '#f0c674' }}>claimed by {claimedBy}</div>
             )}
-            <div style={sub}>{stats.race} · {stats.government}{stats.civilized ? ' (civilized)' : ''}</div>
+            <div style={sub}>{vocab(lang, stats.race)} · {vocab(lang, stats.government)}{stats.civilized ? ' (civilized)' : ''}</div>
             {govDesc && <div style={desc}>“{govDesc}”</div>}
 
             <div style={row}>

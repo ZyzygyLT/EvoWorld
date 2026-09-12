@@ -158,6 +158,7 @@ class Kingdom:
     leader: Leader | None = None
     hero: Hero | None = None
     notables: list[Notable] = field(default_factory=list)  # court figures
+    founded_month: int = 0  # for "oldest realm" records
     population_history: list[int] = field(default_factory=list)  # yearly samples
     last_gov_shift_month: int = -1_000_000  # cooldown for government shifts
     tech_level: int = 0  # 0 Stone .. 4 Medieval

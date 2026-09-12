@@ -1,12 +1,18 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { biomeColor } from '../biomes.js';
+import { vocab } from '../i18n.js';
 import StatsPanel from './StatsPanel.jsx';
 
 /**
  * Canvas world map with pan/zoom + political overlay + site markers.
  * Re-fits the camera on every world load; survives canvas resizes.
  */
-export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection, claims = [], worldMode = 'single', onClaim }) {    const canvasRef = useRef(null);
+export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection, claims = [], worldMode = 'single', onClaim, lang = 'es', canvasRef: externalRef }) {
+    const canvasRef = useRef(null);
+    // expose the canvas for PNG export
+    useEffect(() => {
+        if (externalRef) externalRef.current = canvasRef.current;
+    });
     const viewRef = useRef(null);   // null => needs fit
     const dragRef = useRef(null);
     const [hover, setHover] = useState('');
@@ -15,9 +21,63 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     const W = world?.width ?? 0;
     const H = world?.height ?? 0;
 
+    // static per-world layers: lake mask (ocean not connected to edge) + hillshade
+    const staticRef = useRef(null);
+    const staticKeyRef = useRef('');
+    useEffect(() => {
+        if (!world) return;
+        const key = `${state?.seed}`;
+        if (staticKeyRef.current === key && staticRef.current) return;
+        staticKeyRef.current = key;
+        const grid = world.biome;
+        const elev = world.elevation;  // 0..255 quantized heights (may be absent in old snapshots)
+        // flood fill ocean from the edges -> anything wet left over is a lake
+        const lake = new Uint8Array(W * H);
+        if (grid) {
+            const wet = (x, y) => grid[y][x] === 0;
+            const seen = new Uint8Array(W * H);
+            const stack = [];
+            for (let x = 0; x < W; x++) { stack.push([x, 0], [x, H - 1]); }
+            for (let y = 0; y < H; y++) { stack.push([0, y], [W - 1, y]); }
+            while (stack.length) {
+                const [x, y] = stack.pop();
+                if (x < 0 || y < 0 || x >= W || y >= H) continue;
+                const i = y * W + x;
+                if (seen[i] || !wet(x, y)) continue;
+                seen[i] = 1;
+                stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+            }
+            for (let i = 0; i < W * H; i++) {
+                const y = Math.floor(i / W), x = i % W;
+                if (wet(x, y) && !seen[i]) lake[i] = 1;
+            }
+        }
+        // hillshade 0..1 from elevation gradient (fake NW light)
+        let shade = null;
+        if (elev) {
+            shade = new Float32Array(W * H);
+            const at = (x, y) => elev[Math.max(0, Math.min(H - 1, y)) * W + Math.max(0, Math.min(W - 1, x))] / 255;
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    const dx = at(x - 1, y) - at(x + 1, y);
+                    const dy = at(x, y - 1) - at(x, y + 1);
+                    // light from NW: slopes facing NW brighter
+                    shade[y * W + x] = Math.max(-0.35, Math.min(0.35, (dx + dy) * 1.4));
+                }
+            }
+        }
+        staticRef.current = { lake, shade };
+    }, [world, state, W, H]);
+
     // paint the biome base into an offscreen canvas once per state/mode
     const baseRef = useRef(null);
     const baseKeyRef = useRef('');
+    // deterministic per-tile tone variation (breaks the flat-color look)
+    const tone = (x, y) => {
+        let h = (x * 73856093) ^ (y * 19349663);
+        h = (h ^ (h >> 13)) >>> 0;
+        return 0.92 + (h % 17) / 17 * 0.16;  // 0.92..1.08
+    };
     useEffect(() => {
         if (!world) return;
         // repaint only when the world, mode, or month-bucket changes (not every tick)
@@ -31,14 +91,48 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         const ctx = cv.getContext('2d', { willReadFrequently: true });
         const img = ctx.createImageData(W, H);
         const grid = world.biome;
+        const elev = world.elevation;
+        const { lake, shade } = staticRef.current ?? {};
+        const isOcean = (x, y) => grid[y][x] === 0;
         const dim = mapMode === 'political' || mapMode === 'realms';
         const influence = mapMode === 'realms' ? tick?.influence : null;
         for (let y = 0; y < H; y++) {
             for (let x = 0; x < W; x++) {
-                const c = biomeColor(grid[y][x]);
                 const i = (y * W + x) * 4;
-                let [r, g, b] = c;
+                let [r, g, b] = biomeColor(grid[y][x]);
+                const hgt = elev ? elev[y * W + x] / 255 : 0.5;
+                // lakes render as dark teal, not deep ocean blue
+                if (grid[y][x] === 0 && lake && lake[y * W + x]) {
+                    r = 32; g = 110; b = 120;
+                }
+                // shallow coastal water: ocean touching land
+                if (grid[y][x] === 0 && !(lake && lake[y * W + x])) {
+                    const nearLand = (x > 0 && grid[y][x - 1] !== 0) || (x + 1 < W && grid[y][x + 1] !== 0)
+                        || (y > 0 && grid[y - 1][x] !== 0) || (y + 1 < H && grid[y + 1][x] !== 0);
+                    if (nearLand) { r = 38; g = 140; b = 200; }
+                }
+                // sandy beaches: land touching ocean (plains/desert)
+                if (grid[y][x] !== 0 && hgt < 0.45) {
+                    const nearSea = (x > 0 && grid[y][x - 1] === 0) || (x + 1 < W && grid[y][x + 1] === 0)
+                        || (y > 0 && grid[y - 1][x] === 0) || (y + 1 < H && grid[y + 1][x] === 0);
+                    if (nearSea && (grid[y][x] === 3 || grid[y][x] === 4 || grid[y][x] === 15)) {
+                        r = 232; g = 210; b = 150;
+                    }
+                }
+                // snow caps on very high land
+                if (grid[y][x] !== 0 && hgt > 0.88 && grid[y][x] !== 10) {
+                    r = 235; g = 238; b = 240;
+                }
+                // rivers: bright center (banks darkened below)
                 if (world.rivers[y][x]) { r = 90; g = 160; b = 255; }
+                // per-tile tone variation
+                const t = tone(x, y);
+                r *= t; g *= t; b *= t;
+                // hillshade relief
+                if (shade && grid[y][x] !== 0) {
+                    const s = 1 + shade[y * W + x];
+                    r *= s; g *= s; b *= s;
+                }
                 if (dim) { r = r * 0.3 + 12; g = g * 0.3 + 12; b = b * 0.3 + 12; }
                 if (influence) {
                     const kid = influence[y][x];
@@ -49,7 +143,22 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                         b = k.color[2] * 0.6 + b * 0.2;
                     }
                 }
-                img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
+                img.data[i] = Math.max(0, Math.min(255, r));
+                img.data[i + 1] = Math.max(0, Math.min(255, g));
+                img.data[i + 2] = Math.max(0, Math.min(255, b));
+                img.data[i + 3] = 255;
+            }
+        }
+        // river banks: darken land hugging a river
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                if (world.rivers[y][x]) continue;
+                const nearRiver = (x > 0 && world.rivers[y][x - 1]) || (x + 1 < W && world.rivers[y][x + 1])
+                    || (y > 0 && world.rivers[y - 1][x]) || (y + 1 < H && world.rivers[y + 1][x]);
+                if (nearRiver) {
+                    const i = (y * W + x) * 4;
+                    img.data[i] *= 0.72; img.data[i + 1] *= 0.78; img.data[i + 2] *= 0.85;
+                }
             }
         }
         // realm borders: darker edge where the neighbor tile belongs to another realm
@@ -77,7 +186,8 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         const canvas = canvasRef.current;
         if (!canvas || !baseRef.current || !W) return;
         const ctx = canvas.getContext('2d');
-        const v = viewRef.current ?? fitView(canvas);
+        // fresh world opens zoomed on the inhabited lands (not a tiny strip)
+        const v = viewRef.current ?? fitInhabited(canvas);
         viewRef.current = v;
         const { x, y, scale } = v;
         // letterbox: deep slate with a subtle dot grid (not flat black)
@@ -198,6 +308,34 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         };
     }
 
+    function fitInhabited(canvas) {
+        // zoom to the bounding box of all known sites (+margin), so the
+        // settled world fills the screen instead of a tiny strip
+        const pts = [];
+        for (const k of state?.kingdoms ?? []) {
+            for (const s of k.sites ?? []) pts.push([s.x, s.y]);
+        }
+        for (const k of tick?.kingdoms ?? []) {
+            for (const s of k.sites ?? []) pts.push([s.x, s.y]);
+        }
+        if (!pts.length) return fitView(canvas);
+        let x0 = W, y0 = H, x1 = 0, y1 = 0;
+        for (const [x, y] of pts) {
+            x0 = Math.min(x0, x); y0 = Math.min(y0, y);
+            x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+        }
+        const M = 12;  // tile margin
+        x0 = Math.max(0, x0 - M); y0 = Math.max(0, y0 - M);
+        x1 = Math.min(W - 1, x1 + M); y1 = Math.min(H - 1, y1 + M);
+        const bw = Math.max(8, x1 - x0 + 1), bh = Math.max(8, y1 - y0 + 1);
+        const scale = Math.min(canvas.width / bw, canvas.height / bh, 24);
+        return {
+            scale,
+            x: (canvas.width - bw * scale) / 2 - x0 * scale,
+            y: (canvas.height - bh * scale) / 2 - y0 * scale,
+        };
+    }
+
     // resize handling + initial fit
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -216,12 +354,15 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
 
     useEffect(() => { draw(); }, [tick, draw]);
 
-    // "F" re-fits the camera
+    // "F" re-fits the camera to the whole map
     useEffect(() => {
         const onKey = (e) => {
             if (e.key === 'f' || e.key === 'F') {
-                viewRef.current = null;
-                draw();
+                const canvas = canvasRef.current;
+                if (canvas && W) {
+                    viewRef.current = fitView(canvas);
+                    draw();
+                }
             }
         };
         window.addEventListener('keydown', onKey);
@@ -236,7 +377,8 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         15: 'SHRUBLAND', 16: 'HILL',
     };
     const ERAS = ['Stone Age', 'Bronze', 'Iron', 'Classical', 'Medieval'];
-    const biomeName = (id) => BIOME_LABELS[id] || '?';
+    const biomeName = (id) => vocab(lang, BIOME_LABELS[id] || '?');
+    const eraName = (lvl) => vocab(lang, ERAS[lvl] ?? '?');
 
     const toGrid = (e) => {
         const canvas = canvasRef.current;
@@ -273,7 +415,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                 for (const k of tick.kingdoms)
                     for (const s of k.sites)
                         if (s.x === g.gx && s.y === g.gy) {
-                            const era = k.tech_level !== undefined ? ` · ${ERAS[k.tech_level]}` : '';
+                            const era = k.tech_level !== undefined ? ` · ${eraName(k.tech_level)}` : '';
                             owner = ` · ${k.name} (${s.name}${era})`;
                         }
                 let beast = '';
@@ -364,6 +506,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                     claimable={worldMode === 'league' && !claims.some(c => c.kingdom_id === stats.id)}
                     claimedBy={(claims.find(c => c.kingdom_id === stats.id) || {}).user_name}
                     onClaim={onClaim}
+                    lang={lang}
                 />
             )}
             {hover && (

@@ -58,7 +58,11 @@ def test_war_has_name_and_cause(small_world, races, governments):
 
 
 def test_heroes_emerge_and_fall(small_world, races, governments):
-    """Heroes emerge during wars; with several war-filled runs at least one appears."""
+    """Heroes emerge during wars; with several war-filled runs at least one appears.
+
+    (HERO_EMERGED also covers court appointments — merchants/warlords — so
+    we assert on true battlefield champions specifically.)
+    """
     appeared = False
     for seed in (11, 23, 37, 40013):
         e = SimEngine(small_world, races, governments, seed=seed)
@@ -67,9 +71,7 @@ def test_heroes_emerge_and_fall(small_world, races, governments):
         emerged = [
             ev for ev in e.chronicle.events if ev.type == EventType.HERO_EMERGED
         ]
-        if emerged:
-            for ev in emerged:
-                assert "champion" in ev.text.lower()
+        if any("champion" in ev.text.lower() for ev in emerged):
             appeared = True
             break
     assert appeared, "no hero emerged across 4 seeds x 100y — emergence too rare"
