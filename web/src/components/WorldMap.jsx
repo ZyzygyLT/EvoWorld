@@ -313,9 +313,9 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     }
 
     function fitInhabited(canvas) {
-        // zoom CLOSE on the inhabited lands so the map fills the screen:
-        // bounding box of all known sites, then 1.8x closer on its center
-        // (a bbox of every site on a developed world is the whole map)
+        // COVER (not contain): the settled lands always FILL the screen.
+        // Bounding box of all known sites, scaled with MAX so there are no
+        // letterbox bands; cropped edges are reachable by pan/zoom-out.
         const pts = [];
         for (const k of state?.kingdoms ?? []) {
             for (const s of k.sites ?? []) pts.push([s.x, s.y]);
@@ -329,18 +329,35 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
             x0 = Math.min(x0, x); y0 = Math.min(y0, y);
             x1 = Math.max(x1, x); y1 = Math.max(y1, y);
         }
-        const M = 12;  // tile margin
+        const M = 10;  // tile margin
         x0 = Math.max(0, x0 - M); y0 = Math.max(0, y0 - M);
         x1 = Math.min(W - 1, x1 + M); y1 = Math.min(H - 1, y1 + M);
         const bw = Math.max(8, x1 - x0 + 1), bh = Math.max(8, y1 - y0 + 1);
         const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-        const scale = Math.min(canvas.width / bw, canvas.height / bh, 24) * 1.8;
-        const s2 = Math.min(scale, 24);
+        const scale = Math.min(Math.max(canvas.width / bw, canvas.height / bh), 24);
         return {
-            scale: s2,
-            x: canvas.width / 2 - cx * s2,
-            y: canvas.height / 2 - cy * s2,
+            scale,
+            x: canvas.width / 2 - cx * scale,
+            y: canvas.height / 2 - cy * scale,
         };
+    }
+
+    function clampView(canvas, v) {
+        // keep the map put: when zoomed in, never pan past the edges into
+        // the void (small margin allowed); when zoomed out, keep it centered
+        const mw = W * v.scale, mh = H * v.scale;
+        const m = 48;  // px of slack at the edges
+        if (mw >= canvas.width) {
+            v.x = Math.max(canvas.width - mw - m, Math.min(m, v.x));
+        } else {
+            v.x = (canvas.width - mw) / 2;
+        }
+        if (mh >= canvas.height) {
+            v.y = Math.max(canvas.height - mh - m, Math.min(m, v.y));
+        } else {
+            v.y = (canvas.height - mh) / 2;
+        }
+        return v;
     }
 
     // resize handling + initial fit
@@ -408,10 +425,12 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     };
     const onMove = (e) => {
         if (dragRef.current) {
+            const canvas = canvasRef.current;
             const d = dragRef.current;
             if (Math.abs(e.clientX - d.px) + Math.abs(e.clientY - d.py) > 3) d.moved = true;
             viewRef.current.x = d.vx + (e.clientX - d.px);
             viewRef.current.y = d.vy + (e.clientY - d.py);
+            clampView(canvas, viewRef.current);
             draw();
         } else {
             const g = toGrid(e);
@@ -470,10 +489,14 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         const mx = e.clientX - rect.left, my = e.clientY - rect.top;
         const v = viewRef.current;
         const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
-        const ns = Math.max(1, Math.min(32, v.scale * factor));
+        // min zoom = whole-map fit (never smaller); zoom dives INTO the map
+        // content anchored at the cursor (not the bounding square)
+        const fit = Math.min(canvas.width / W, canvas.height / H);
+        const ns = Math.max(fit, Math.min(32, v.scale * factor));
         v.x = mx - ((mx - v.x) * ns) / v.scale;
         v.y = my - ((my - v.y) * ns) / v.scale;
         v.scale = ns;
+        clampView(canvas, v);
         draw();
     };
 
