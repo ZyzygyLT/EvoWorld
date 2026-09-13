@@ -497,6 +497,8 @@ def _tick_payload(eng: SimEngine) -> dict:
                 "color": list(k.color),
                 "population_history": [int(p) for p in k.population_history],
                 "tech_level": k.tech_level,
+                "military_power": round(eng.kingdom_stats(k)["military_power"], 1),
+                "militarization_pct": k.government.militarization,
                 "techs": sorted(k.techs),
                 "golden_age": k.golden_age_until > eng.month,
                 "founded_month": k.founded_month,
