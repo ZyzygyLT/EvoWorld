@@ -5,6 +5,7 @@ import { renderEvent, t, vocab } from '../i18n.js';
 /** Right sidebar: kingdoms list, ongoing wars, chronicle feed with filters.
  * (Per-kingdom stats live in the floating StatsPanel over the map.) */
 export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect, worldId, worldMode, claims, standings, onClaim, lang = 'es', followId = null, onFollow }) {
+    const [rankSort, setRankSort] = React.useState('points'); // points|pop|sites|tech|military
     const [showKingdoms, setShowKingdoms] = React.useState(true);
     const [showRoom, setShowRoom] = React.useState(false);
     if (!tick) return <aside style={aside}>waiting for simulation…</aside>;
@@ -28,49 +29,76 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                 ))}
             </div>
 
-            {/* kingdoms: collapsed panel with its own scroll (crónica below keeps space) */}
-            <div style={sectionTitle}>
-                Kingdoms {tick.kingdoms.filter(k => k.sites.length).length}
+            {/* Ranking de Reinos — sortable */}
+            <div style={{ ...sectionTitle, display: 'flex', alignItems: 'center', gap: 4 }}>
+                Ranking — Kingdoms {tick.kingdoms.filter(k => k.sites.length).length}
                 <button
                     style={{ ...btn, fontSize: 10, padding: '1px 6px', marginLeft: 6 }}
                     onClick={() => setShowKingdoms(s => !s)}
                 >{showKingdoms ? '▾' : '▸'}</button>
             </div>
-            {showKingdoms && (
-                <div style={{ maxHeight: 260, overflowY: 'auto', marginBottom: 6 }}>
-                    {tick.kingdoms.filter(k => (k.sites?.length ?? 0) > 0).map(k => (
+            {showKingdoms && (() => {
+                const sortKey = rankSort;
+                const sorted = [...tick.kingdoms.filter(k => (k.sites?.length ?? 0) > 0)].sort((a,b) => {
+                    if (sortKey === 'pop') return b.population - a.population;
+                    if (sortKey === 'sites') return b.sites.length - a.sites.length;
+                    if (sortKey === 'tech') return (b.tech_level ?? 0) - (a.tech_level ?? 0);
+                    if (sortKey === 'military') {
+                        const pa = (a.population||0)*(a.militarization_pct||20)/100;
+                        const pb = (b.population||0)*(b.militarization_pct||20)/100;
+                        return pb - pa;
+                    }
+                    // points (standings)
+                    const sa = (standings?.find(s=>s.kingdom_id===a.id)?.points ?? 0);
+                    const sb = (standings?.find(s=>s.kingdom_id===b.id)?.points ?? 0);
+                    return sb - sa;
+                });
+                return (
+                <div style={{ marginBottom: 6 }}>
+                    <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
+                        {[
+                            ['points','Pts'],['pop','Pop'],['sites','Sites'],['tech','Tech'],['military','Mil'],
+                        ].map(([k,label]) => (
+                            <button key={k} onClick={()=>setRankSort(k)}
+                                style={{ ...btn, fontSize: 10, padding: '1px 6px', background: rankSort===k ? '#2f81f7' : btn.background }}>{label}</button>
+                        ))}
+                    </div>
+                    <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+                    {sorted.map((k, idx) => {
+                        const pts = standings?.find(s=>s.kingdom_id===k.id)?.points;
+                        return (
                         <div
                             key={k.id}
                             onClick={() => onSelect(k)}
-                            style={{ ...panel, cursor: 'pointer', marginBottom: 6, border: selected?.id === k.id ? '1px solid #2f81f7' : panel.border }}
+                            style={{ ...panel, cursor: 'pointer', marginBottom: 6, border: selected?.id === k.id ? '1px solid #2f81f7' : panel.border, fontSize: 13 }}
                         >
-                            <div style={kStyle(k)}>
-                                {k.at_war ? '⚔ ' : ''}{k.name}
+                            <div style={{ display:'flex', alignItems:'center', gap: 4 }}>
+                                <span style={{ fontSize: 11, color:'#f0c674', minWidth: 18 }}>#{idx+1}</span>
+                                <span style={{ ...kStyle(k), fontWeight: 600, flex: 1 }}>{k.at_war ? '⚔ ' : ''}{k.name}</span>
+                                {pts !== undefined && <span style={{ fontSize: 11, color:'#f0c674' }}>{pts}pts</span>}
                                 <button
                                     title={followId === k.id ? 'stop following' : 'follow capital'}
                                     onClick={(e) => { e.stopPropagation(); onFollow && onFollow(followId === k.id ? null : k.id); }}
-                                    style={{ ...btn, fontSize: 10, padding: '0 5px', marginLeft: 6,
+                                    style={{ ...btn, fontSize: 10, padding: '0 5px', marginLeft: 4,
                                              background: followId === k.id ? '#2f81f7' : btn.background }}
                                 >◎</button>
                             </div>
-                            <div style={{ fontSize: 11, color: '#8b949e' }}>
-                                {vocab(lang, k.race)} · {vocab(lang, k.government)}{k.golden_age ? ' ✨' : ''}
+                            <div style={{ fontSize: 12, color: '#8b949e' }}>
+                                {vocab(lang, k.race)} · {vocab(lang, k.government)}{k.golden_age ? ' ✨' : ''} · {vocab(lang, ['Stone Age', 'Bronze Age', 'Iron Age', 'Classical Era', 'Medieval Era'][k.tech_level] ?? '')}
                             </div>
-                            {k.tech_level !== undefined && (
-                                <div style={{ fontSize: 10, color: '#8b949e' }}>
-                                    {vocab(lang, ['Stone Age', 'Bronze Age', 'Iron Age', 'Classical Era', 'Medieval Era'][k.tech_level] ?? '')} · pop {k.population.toLocaleString()} · {k.sites.length}s
-                                </div>
-                            )}
+                            <div style={{ fontSize: 12, color: '#c9d1d9' }}>pop {k.population.toLocaleString()} · {k.sites.length} aldeas · mil {k.military_power ?? '?'}</div>
                             {k.leader && (
-                                <div style={{ fontSize: 11 }}>
+                                <div style={{ fontSize: 12 }}>
                                     {vocab(lang, k.leader.title)} {k.leader.name} ({k.leader.reign_years}y)
                                     {k.hero && <span style={{ color: '#f0c674' }}> · champion {k.hero.name}</span>}
                                 </div>
                             )}
                         </div>
-                    ))}
+                    )})}
+                    </div>
                 </div>
-            )}
+                );
+            })()}
 
             {/* fallen realms memorial: collapsed kingdoms, greyed out */}
             {((tick.fallen ?? []).length > 0 || tick.kingdoms.some(k => (k.sites?.length ?? 0) === 0)) && (
@@ -100,7 +128,7 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
             )}
 
             {/* chronicle: guaranteed space + internal scroll + auto-scroll */}
-            <ChronicleFeed events={tick.events} lang={lang} />
+            <ChronicleFeed events={tick.events} lang={lang} tick={tick} />
 
             {/* hitos: world-firsts timeline + auto-computed records */}
             <HitosPanel tick={tick} lang={lang} />
@@ -120,8 +148,32 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
     );
 }
 
+function coloredParts(text, tick) {
+    if (!tick?.kingdoms) return text;
+    // Build sorted by length desc to avoid substring collisions
+    const names = [...tick.kingdoms].sort((a,b)=>b.name.length-a.name.length);
+    let parts = [text];
+    for (const k of names) {
+        const color = `rgb(${k.color[0]},${k.color[1]},${k.color[2]})`;
+        const next = [];
+        for (const p of parts) {
+            if (typeof p !== 'string') { next.push(p); continue; }
+            const idx = p.indexOf(k.name);
+            if (idx === -1) next.push(p);
+            else {
+                if (idx>0) next.push(p.slice(0, idx));
+                next.push(<span key={k.id+idx} style={{ color, fontWeight: 600 }}>{k.name}</span>);
+                if (idx + k.name.length < p.length) next.push(p.slice(idx + k.name.length));
+            }
+        }
+        parts = next;
+    }
+    // also colorize site names (smaller, italic)
+    return parts;
+}
+
 /** Chronicle feed with type filters, milestone highlighting, auto-scroll. */
-function ChronicleFeed({ events, lang }) {
+function ChronicleFeed({ events, lang, tick }) {
     const [filter, setFilter] = React.useState('ALL');
     const boxRef = React.useRef(null);
     const [autoScroll, setAutoScroll] = React.useState(true);
@@ -178,14 +230,14 @@ function ChronicleFeed({ events, lang }) {
                     <div
                         key={i}
                         style={{
-                            fontSize: 11, marginBottom: 3,
+                            fontSize: 13, marginBottom: 4,
                             color: e.type === 'MILESTONE' ? '#f0c674' : undefined,
                             fontWeight: e.type === 'MILESTONE' ? 'bold' : undefined,
                             opacity: 0.92,
                         }}
                     >
                         <span style={{ color: '#58a6ff' }}>[y{Math.floor(e.month / 12)}]</span>{' '}
-                        {renderEvent(lang, e)}
+                        {coloredParts(renderEvent(lang, e), tick)}
                     </div>
                 ))}
             </div>
@@ -299,14 +351,15 @@ function PopulationChart({ values, color }) {
 }
 
 const aside = {
-    width: 340,
-    minWidth: 280,
+    width: 420,
+    minWidth: 360,
     background: '#0d1117',
     borderLeft: '1px solid #21262d',
-    padding: 12,
+    padding: 14,
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',  // panels scroll internally; the aside itself never scrolls
+    fontSize: 14,
 };
 
 const panel = {
