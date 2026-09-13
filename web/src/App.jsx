@@ -84,7 +84,14 @@ export default function App() {
         }
         // deep link: ?world=N opens that world straight away
         const q = new URLSearchParams(location.search).get('world');
-        if (q) openStream(parseInt(q, 10));
+        if (q) {
+            openStream(parseInt(q, 10));
+        } else {
+            // auto-open latest world if none selected (avoids "waiting" limbo)
+            fetch('/api/worlds').then(r => r.json()).then(ws => {
+                if (ws.length && !worldId) openStream(ws[0].id);
+            }).catch(() => {});
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 

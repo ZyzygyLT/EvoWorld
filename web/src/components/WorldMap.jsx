@@ -319,9 +319,8 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     }
 
     function fitInhabited(canvas) {
-        // COVER (not contain): the settled lands always FILL the screen.
-        // Bounding box of all known sites, scaled with MAX so there are no
-        // letterbox bands; cropped edges are reachable by pan/zoom-out.
+        // COVER but not absurd: fit inhabited bbox with 1.35x, so map fills
+        // ~75% of viewport and breathing room remains (no 1.8x wall of pixels)
         const pts = [];
         for (const k of state?.kingdoms ?? []) {
             for (const s of k.sites ?? []) pts.push([s.x, s.y]);
@@ -340,7 +339,9 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         x1 = Math.min(W - 1, x1 + M); y1 = Math.min(H - 1, y1 + M);
         const bw = Math.max(8, x1 - x0 + 1), bh = Math.max(8, y1 - y0 + 1);
         const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-        const scale = Math.min(Math.max(canvas.width / bw, canvas.height / bh), 24);
+        // start with a contained fit, then tighten 1.35x — fills without drowning
+        const contained = Math.min(canvas.width / bw, canvas.height / bh);
+        const scale = Math.min(contained * 1.35, 18);
         return {
             scale,
             x: canvas.width / 2 - cx * scale,
@@ -366,13 +367,22 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         return v;
     }
 
-    // resize handling + initial fit
+    // resize handling + initial fit (preserves world center on devtools open/close)
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ro = new ResizeObserver(() => {
+            const oldW = canvas.width, oldH = canvas.height;
+            const v = viewRef.current;
+            // preserve world coordinate at viewport center
+            const centerWorld = v ? { x: (oldW/2 - v.x)/v.scale, y: (oldH/2 - v.y)/v.scale } : null;
             canvas.width = canvas.clientWidth;
             canvas.height = canvas.clientHeight;
+            if (v && centerWorld) {
+                v.x = canvas.width/2 - centerWorld.x * v.scale;
+                v.y = canvas.height/2 - centerWorld.y * v.scale;
+                clampView(canvas, v);
+            }
             draw();
         });
         ro.observe(canvas);
