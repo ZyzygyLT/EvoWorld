@@ -203,12 +203,17 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                 ctx.fillRect(gx, gy, 2, 2);
             }
         }
-        // map frame
+        // map frame - fixed to viewport, not to map content
         ctx.strokeStyle = '#30363d';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x - 1, y - 1, W * scale + 2, H * scale + 2);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(0.5, 0.5, canvas.width -1, canvas.height -1);
 
         ctx.imageSmoothingEnabled = false;
+        // clip to viewport so zoomed map doesn't bleed outside fixed frame
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, canvas.width, canvas.height);
+        ctx.clip();
         ctx.drawImage(baseRef.current, x, y, W * scale, H * scale);
 
         // live battle heatmap (cells with v>0) on top of the base
@@ -299,6 +304,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                 ctx.stroke();
                 ctx.setLineDash([]);
             }
+            ctx.restore();
         }
     }, [tick, W, H]);
 
