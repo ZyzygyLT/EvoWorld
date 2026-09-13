@@ -33,6 +33,10 @@ SCORE_TABLE: dict[str, int] = {
     str(EventType.SITE_CAPTURED): 5,  # capturing side only (first kingdom id)
     str(EventType.PLAGUE): -10,
     str(EventType.KINGDOM_COLLAPSED): -25,
+    str(EventType.REBELLION): -15,
+    str(EventType.INDEPENDENCE): 12,
+    str(EventType.COLONY_FOUNDED): 8,
+    str(EventType.ALLIANCE_FORMED): 5,
 }
 
 # events resolved from the wars list rather than the chronicle directly
@@ -163,11 +167,14 @@ def score_new_events(
     by_kid = {c["kingdom_id"]: c for c in claims}
     messages: list[str] = []
 
-    # chronicle events since the cursor
+    # chronicle events since the cursor — each involved claimed kingdom scores
     for ev in eng.chronicle.events:
         if ev.month <= since_month:
             continue
+        scored_kids: set[int] = set()
         for kid in ev.kingdom_ids:
+            if kid in scored_kids:
+                continue
             claim = by_kid.get(kid)
             if claim is None:
                 continue
@@ -180,7 +187,7 @@ def score_new_events(
             _apply_points(claim["id"], delta)
             claim["points"] += delta
             messages.append(_toast_text(claim["user_name"], delta, ev.text))
-            break  # score once per event per claim
+            scored_kids.add(kid)
 
     # war outcomes + city foundings need extra parsing
     for claim in claims:
@@ -227,6 +234,14 @@ def _event_delta(ev, kid: int) -> int:
         return SCORE_TABLE[str(EventType.PLAGUE)]
     if t == EventType.KINGDOM_COLLAPSED:
         return SCORE_TABLE[str(EventType.KINGDOM_COLLAPSED)]
+    if t == EventType.REBELLION:
+        return SCORE_TABLE[str(EventType.REBELLION)]
+    if t == EventType.INDEPENDENCE:
+        return SCORE_TABLE[str(EventType.INDEPENDENCE)]
+    if t == EventType.COLONY_FOUNDED:
+        return SCORE_TABLE[str(EventType.COLONY_FOUNDED)]
+    if t == EventType.ALLIANCE_FORMED:
+        return SCORE_TABLE[str(EventType.ALLIANCE_FORMED)]
     if t == EventType.SITE_CAPTURED:
         # only the capturing side (first kingdom id) scores
         if ev.kingdom_ids and ev.kingdom_ids[0] == kid:
@@ -235,6 +250,8 @@ def _event_delta(ev, kid: int) -> int:
     if t == EventType.MILESTONE:
         return MILESTONE_POINTS
     if t == EventType.SITE_FOUNDED and "(City)" in ev.text:
+        return CITY_FOUNDED_POINTS
+    if t == EventType.SITE_FOUNDED and (ev.params or {}).get("category") == "City":
         return CITY_FOUNDED_POINTS
     return 0
 

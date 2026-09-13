@@ -396,7 +396,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         10: 'PEAK', 11: 'ICE', 12: 'ICE', 13: 'ICE', 14: 'SMALL HILLS',
         15: 'SHRUBLAND', 16: 'HILL',
     };
-    const ERAS = ['Stone Age', 'Bronze', 'Iron', 'Classical', 'Medieval'];
+    const ERAS = ['Stone Age', 'Bronze', 'Iron', 'Classical', 'Medieval', 'Renaissance', 'Enlightenment'];
     const biomeName = (id) => vocab(lang, BIOME_LABELS[id] || '?');
     const eraName = (lvl) => vocab(lang, ERAS[lvl] ?? '?');
 

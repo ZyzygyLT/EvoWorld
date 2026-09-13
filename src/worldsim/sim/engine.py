@@ -67,7 +67,7 @@ REBELLION_CHANCE_MONTHLY = 0.0008  # per month once strained (runaway guard belo
 MAX_KINGDOMS = 12  # hard cap: rebellions stop splitting at this count
 
 # tech eras (the world starts in the Stone Age and advances over centuries)
-ERA_NAMES = ["Stone Age", "Bronze Age", "Iron Age", "Classical Era", "Medieval Era"]
+ERA_NAMES = ["Stone Age", "Bronze Age", "Iron Age", "Classical Era", "Medieval Era", "Renaissance", "Enlightenment"]
 ERA_POPCAP_BONUS = 0.25  # +25% site popcap per era (urbanization)
 ERA_ARMY_BONUS = 0.15  # +15% military power per era
 ERA_INFLUENCE_RADIUS = 4  # base claim radius at Stone Age ...

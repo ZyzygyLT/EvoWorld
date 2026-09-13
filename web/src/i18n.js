@@ -124,6 +124,8 @@ export const VOCAB = {    en: {},
         "Iron Age": "Edad de Hierro",
         "Classical Era": "Era Clásica",
         "Medieval Era": "Era Medieval",
+        "Renaissance": "Renacimiento",
+        "Enlightenment": "Ilustración",
         "King": "Rey",
         "Chief": "Jefe",
         "Capital": "Capital",
@@ -163,6 +165,13 @@ export const TECH_NAMES = {
     priesthood: { en: "Priesthood", es: "Sacerdocio" },
     philosophy: { en: "Philosophy", es: "Filosofía" },
     engineering: { en: "Engineering", es: "Ingeniería" },
+    gunpowder: { en: "Gunpowder", es: "Pólvora" },
+    banking: { en: "Banking", es: "Banca" },
+    printing: { en: "Printing Press", es: "Imprenta" },
+    renaissance_arts: { en: "Renaissance Arts", es: "Artes renacentistas" },
+    artillery: { en: "Artillery", es: "Artillería" },
+    steam_power: { en: "Steam Power", es: "Máquina de vapor" },
+    encyclopedia: { en: "Encyclopedia", es: "Enciclopedia" },
 };
 
 export function techName(lang, id) {
@@ -172,12 +181,14 @@ export function techName(lang, id) {
 export const TECH_BRANCH = {
     ambush: "warfare", bronze_arms: "warfare", iron_arms: "warfare",
     phalanx: "warfare", siege: "warfare", steel: "warfare",
+    gunpowder: "warfare", artillery: "warfare",
     agriculture: "craft", irrigation: "craft", pottery: "craft",
     metalworking: "craft", guilds: "craft", architecture: "craft",
+    renaissance_arts: "craft", steam_power: "craft",
     fishing: "trade", coastal_trade: "trade", currency: "trade",
-    merchant_fleet: "trade", cartography: "trade",
+    merchant_fleet: "trade", cartography: "trade", banking: "trade",
     oral_tradition: "lore", writing: "lore", priesthood: "lore",
-    philosophy: "lore", engineering: "lore",
+    philosophy: "lore", engineering: "lore", printing: "lore", encyclopedia: "lore",
 };
 
 export const BRANCH_COLORS = {

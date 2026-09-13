@@ -12,7 +12,7 @@ def test_tech_tree_structure():
     assert len(TECHS) >= 20
     for tid, t in TECHS.items():
         assert t["branch"] in ("warfare", "craft", "trade", "lore")
-        assert 0 <= t["era"] <= 4
+        assert 0 <= t["era"] <= 6
         assert t["cost"] > 0
         for req in t["requires"]:
             assert req in TECHS, f"{tid} requires unknown {req}"

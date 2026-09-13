@@ -111,6 +111,36 @@ TECHS: dict[str, dict] = {
         "requires": ["philosophy", "metalworking"],
         "effects": {"popcap": 0.15, "army": 0.10},
     },
+    # --- renaissance (era 5) -------------------------------------------------
+    "gunpowder": {
+        "branch": "warfare", "era": 5, "cost": 1.6, "requires": ["steel"],
+        "effects": {"army": 0.15, "capture": 0.05},
+    },
+    "banking": {
+        "branch": "trade", "era": 5, "cost": 1.6, "requires": ["cartography"],
+        "effects": {"colony": 0.10, "growth": 0.10},
+    },
+    "printing": {
+        "branch": "lore", "era": 5, "cost": 1.6, "requires": ["engineering"],
+        "effects": {"tech": 0.25},
+    },
+    "renaissance_arts": {
+        "branch": "craft", "era": 5, "cost": 1.6, "requires": ["architecture"],
+        "effects": {"popcap": 0.15, "golden": 0.0005},
+    },
+    # --- enlightenment (era 6) -----------------------------------------------
+    "artillery": {
+        "branch": "warfare", "era": 6, "cost": 1.8, "requires": ["gunpowder"],
+        "effects": {"army": 0.20},
+    },
+    "steam_power": {
+        "branch": "craft", "era": 6, "cost": 1.8, "requires": ["banking", "printing"],
+        "effects": {"popcap": 0.25, "growth": 0.15},
+    },
+    "encyclopedia": {
+        "branch": "lore", "era": 6, "cost": 1.8, "requires": ["printing"],
+        "effects": {"tech": 0.30, "plague": -0.10},
+    },
 }
 
 # government affinity per branch (research taste); Tribal leans practical
@@ -150,6 +180,13 @@ TECH_NAMES: dict[str, dict[str, str]] = {
     "priesthood": {"en": "Priesthood", "es": "Sacerdocio"},
     "philosophy": {"en": "Philosophy", "es": "Filosofía"},
     "engineering": {"en": "Engineering", "es": "Ingeniería"},
+    "gunpowder": {"en": "Gunpowder", "es": "Pólvora"},
+    "banking": {"en": "Banking", "es": "Banca"},
+    "printing": {"en": "Printing Press", "es": "Imprenta"},
+    "renaissance_arts": {"en": "Renaissance Arts", "es": "Artes renacentistas"},
+    "artillery": {"en": "Artillery", "es": "Artillería"},
+    "steam_power": {"en": "Steam Power", "es": "Máquina de vapor"},
+    "encyclopedia": {"en": "Encyclopedia", "es": "Enciclopedia"},
 }
 
 

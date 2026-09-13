@@ -1,7 +1,7 @@
 import React from 'react';
 import { vocab, techName, TECH_BRANCH, BRANCH_COLORS } from '../i18n.js';
 
-const ERAS = ['Stone Age', 'Bronze Age', 'Iron Age', 'Classical', 'Medieval'];
+const ERAS = ['Stone Age', 'Bronze Age', 'Iron Age', 'Classical', 'Medieval', 'Renaissance', 'Enlightenment'];
 const REL_COLORS = {
     ALLIANCE: '#3fb950',
     PEACE: '#8b949e',

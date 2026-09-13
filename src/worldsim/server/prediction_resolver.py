@@ -159,13 +159,13 @@ def _check_pred(eng: SimEngine, p: dict) -> tuple[str, bool] | None:
         target = int(params.get("era_level", 1))
         if k is None:
             return ("the realm vanished before the era dawned", False)
+        wanted = ERA_NAMES[target] if 0 <= target < len(ERA_NAMES) else ""
         for e in events:
-            if (
-                e.type == EventType.TECH_ERA
-                and k.id in e.kingdom_ids
-                and ERA_NAMES[target] in e.text
-            ):
-                return (f"{k.name} reached the {ERA_NAMES[target]} as prophesied", True)
+            if e.type == EventType.TECH_ERA and k.id in e.kingdom_ids:
+                # prefer structured params (language-independent), fall back to text
+                era_val = (e.params or {}).get("era", "")
+                if era_val == wanted or wanted in e.text:
+                    return (f"{k.name} reached the {ERA_NAMES[target]} as prophesied", True)
         return None
 
     if kind == "rebellion_any":
@@ -178,20 +178,28 @@ def _check_pred(eng: SimEngine, p: dict) -> tuple[str, bool] | None:
         k = _kingdom_by_id(eng, params.get("kingdom_id", -1))
         if k is None:
             return ("the realm vanished before raising a City", False)
+        # primary: milestone_first_city (MILESTONE) — also keep SITE_FOUNDED fallback for old saves
         for e in events:
-            if (
-                e.type == EventType.SITE_FOUNDED
-                and k.id in e.kingdom_ids
-                and "(City)" in e.text
-            ):
+            is_city = (
+                (e.type == EventType.MILESTONE and e.msg_key == "milestone_first_city")
+                or (e.type == EventType.SITE_FOUNDED and "(City)" in e.text)
+                or (e.type == EventType.SITE_FOUNDED and (e.params or {}).get("category") == "City")
+            )
+            if is_city and k.id in e.kingdom_ids:
                 return (f"{k.name} raised a City as prophesied", True)
-        # special: if ANY other kingdom raised a city first, the prophecy dies
+        # if ANY other kingdom raised the first city before k, prophecy fails
         for e in events:
-            if e.type == EventType.SITE_FOUNDED and "(City)" in e.text:
-                other = next(
-                    (kid for kid in e.kingdom_ids if kid != k.id), None
-                )
-                if other is not None:
+            is_city = (
+                (e.type == EventType.MILESTONE and e.msg_key == "milestone_first_city")
+                or (e.type == EventType.SITE_FOUNDED and "(City)" in e.text)
+                or (e.type == EventType.SITE_FOUNDED and (e.params or {}).get("category") == "City")
+            )
+            if is_city and e.kingdom_ids:
+                if any(kid != k.id for kid in e.kingdom_ids):
+                    return ("another realm raised the first City first", False)
+                # milestone with no kingdom_ids but params.kingdom indicates owner
+                owner_name = (e.params or {}).get("kingdom")
+                if owner_name and owner_name != k.name:
                     return ("another realm raised the first City first", False)
         return None
 

@@ -129,6 +129,8 @@ VOCAB: dict[str, dict[str, str]] = {
         "Iron Age": "Edad de Hierro",
         "Classical Era": "Era Clásica",
         "Medieval Era": "Era Medieval",
+        "Renaissance": "Renacimiento",
+        "Enlightenment": "Ilustración",
         "King": "Rey",
         "Chief": "Jefe",
         "Capital": "Capital",
