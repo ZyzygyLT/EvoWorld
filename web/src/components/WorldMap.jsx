@@ -319,34 +319,9 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     }
 
     function fitInhabited(canvas) {
-        // COVER but not absurd: fit inhabited bbox with 1.35x, so map fills
-        // ~75% of viewport and breathing room remains (no 1.8x wall of pixels)
-        const pts = [];
-        for (const k of state?.kingdoms ?? []) {
-            for (const s of k.sites ?? []) pts.push([s.x, s.y]);
-        }
-        for (const k of tick?.kingdoms ?? []) {
-            for (const s of k.sites ?? []) pts.push([s.x, s.y]);
-        }
-        if (!pts.length) return fitView(canvas);
-        let x0 = W, y0 = H, x1 = 0, y1 = 0;
-        for (const [x, y] of pts) {
-            x0 = Math.min(x0, x); y0 = Math.min(y0, y);
-            x1 = Math.max(x1, x); y1 = Math.max(y1, y);
-        }
-        const M = 10;  // tile margin
-        x0 = Math.max(0, x0 - M); y0 = Math.max(0, y0 - M);
-        x1 = Math.min(W - 1, x1 + M); y1 = Math.min(H - 1, y1 + M);
-        const bw = Math.max(8, x1 - x0 + 1), bh = Math.max(8, y1 - y0 + 1);
-        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-        // start with a contained fit, then tighten 1.35x — fills without drowning
-        const contained = Math.min(canvas.width / bw, canvas.height / bh);
-        const scale = Math.min(contained * 1.35, 18);
-        return {
-            scale,
-            x: canvas.width / 2 - cx * scale,
-            y: canvas.height / 2 - cy * scale,
-        };
+        // FIJO a pedido: siempre mundo completo, sin zoom al bbox habitado.
+        // No crece el cuadrado con el contenido; escala fija contenida.
+        return fitView(canvas);
     }
 
     function clampView(canvas, v) {
@@ -394,34 +369,9 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
 
     useEffect(() => { draw(); }, [tick, draw]);
 
-    // follow-cam: keep the followed kingdom's capital centered while it lives
-    useEffect(() => {
-        if (followId == null || !tick) return;
-        const k = tick.kingdoms?.find(k => k.id === followId);
-        const cap = k?.sites?.find(s => s.is_capital) ?? k?.sites?.[0];
-        const canvas = canvasRef.current;
-        if (!cap || !canvas || !viewRef.current) return;
-        viewRef.current.x = canvas.width / 2 - (cap.x + 0.5) * viewRef.current.scale;
-        viewRef.current.y = canvas.height / 2 - (cap.y + 0.5) * viewRef.current.scale;
-        clampView(canvas, viewRef.current);
-        draw();
-    }, [tick, followId, draw]);
-
-    // war theater: pan to midpoint between war capitals
-    useEffect(() => {
-        if (!warFocus || !tick) return;
-        const ka = tick.kingdoms?.find(k => k.name === warFocus.a);
-        const kb = tick.kingdoms?.find(k => k.name === warFocus.b);
-        const ca = ka?.sites?.find(s => s.is_capital) ?? ka?.sites?.[0];
-        const cb = kb?.sites?.find(s => s.is_capital) ?? kb?.sites?.[0];
-        const canvas = canvasRef.current;
-        if (!ca || !cb || !canvas || !viewRef.current) return;
-        const mx = (ca.x + cb.x)/2 + 0.5, my = (ca.y + cb.y)/2 + 0.5;
-        viewRef.current.x = canvas.width / 2 - mx * viewRef.current.scale;
-        viewRef.current.y = canvas.height / 2 - my * viewRef.current.scale;
-        clampView(canvas, viewRef.current);
-        draw();
-    }, [warFocus, draw]);
+    // follow-cam / war theater deshabilitados: mapa fijo no hace pan automático
+    useEffect(() => {}, [tick, followId, draw]);
+    useEffect(() => {}, [warFocus, draw]);
 
     // "F" re-fits the camera to the whole map (and breaks follow-cam)
     useEffect(() => {
@@ -474,12 +424,9 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
             const d = dragRef.current;
             if (Math.abs(e.clientX - d.px) + Math.abs(e.clientY - d.py) > 3) {
                 d.moved = true;
-                if (onFollowClear) onFollowClear();  // manual pan breaks follow-cam
             }
-            viewRef.current.x = d.vx + (e.clientX - d.px);
-            viewRef.current.y = d.vy + (e.clientY - d.py);
-            clampView(canvas, viewRef.current);
-            draw();
+            // mapa fijo: sin pan — solo detectar click vs drag
+            return;
         } else {
             const g = toGrid(e);
             if (g && world && tick) {
@@ -532,20 +479,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     };
     const onWheel = (e) => {
         e.preventDefault();
-        const canvas = canvasRef.current;
-        const rect = canvas.getBoundingClientRect();
-        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-        const v = viewRef.current;
-        const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
-        // min zoom = whole-map fit (never smaller); zoom dives INTO the map
-        // content anchored at the cursor (not the bounding square)
-        const fit = Math.min(canvas.width / W, canvas.height / H);
-        const ns = Math.max(fit, Math.min(32, v.scale * factor));
-        v.x = mx - ((mx - v.x) * ns) / v.scale;
-        v.y = my - ((my - v.y) * ns) / v.scale;
-        v.scale = ns;
-        clampView(canvas, v);
-        draw();
+        // zoom deshabilitado a pedido: mapa fijo, sin escala
     };
 
     return (
@@ -571,7 +505,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
             </div>
             <canvas
                 ref={canvasRef}
-                style={{ width: '100%', height: '100%', cursor: 'grab', display: 'block' }}
+                style={{ width: '100%', height: '100%', cursor: 'pointer', display: 'block' }}
                 onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
                 onMouseLeave={onUp} onWheel={onWheel}
             />
