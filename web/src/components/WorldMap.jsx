@@ -7,7 +7,7 @@ import StatsPanel from './StatsPanel.jsx';
  * Canvas world map with pan/zoom + political overlay + site markers.
  * Re-fits the camera on every world load; survives canvas resizes.
  */
-export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection, claims = [], worldMode = 'single', onClaim, lang = 'es', canvasRef: externalRef, followId = null, onFollowClear }) {
+export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection, claims = [], worldMode = 'single', onClaim, lang = 'es', canvasRef: externalRef, followId = null, onFollowClear, warFocus = null }) {
     const canvasRef = useRef(null);
     // expose the canvas for PNG export
     useEffect(() => {
@@ -390,6 +390,22 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         clampView(canvas, viewRef.current);
         draw();
     }, [tick, followId, draw]);
+
+    // war theater: pan to midpoint between war capitals
+    useEffect(() => {
+        if (!warFocus || !tick) return;
+        const ka = tick.kingdoms?.find(k => k.name === warFocus.a);
+        const kb = tick.kingdoms?.find(k => k.name === warFocus.b);
+        const ca = ka?.sites?.find(s => s.is_capital) ?? ka?.sites?.[0];
+        const cb = kb?.sites?.find(s => s.is_capital) ?? kb?.sites?.[0];
+        const canvas = canvasRef.current;
+        if (!ca || !cb || !canvas || !viewRef.current) return;
+        const mx = (ca.x + cb.x)/2 + 0.5, my = (ca.y + cb.y)/2 + 0.5;
+        viewRef.current.x = canvas.width / 2 - mx * viewRef.current.scale;
+        viewRef.current.y = canvas.height / 2 - my * viewRef.current.scale;
+        clampView(canvas, viewRef.current);
+        draw();
+    }, [warFocus, draw]);
 
     // "F" re-fits the camera to the whole map (and breaks follow-cam)
     useEffect(() => {

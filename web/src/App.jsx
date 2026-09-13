@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import WorldMap from './components/WorldMap.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import StartScreen from './components/StartScreen.jsx';
+import Timeline from './components/Timeline.jsx';
 import WorldBar from './components/WorldBar.jsx';
 import { DEFAULT_LANG, t } from './i18n.js';
 import { ensureIdentity, getIdentity } from './identity.js';
@@ -28,6 +29,9 @@ export default function App() {
     const [standings, setStandings] = useState([]);
     const [toasts, setToasts] = useState([]);
     const [followId, setFollowId] = useState(null);  // kingdom id the camera tracks
+    const [warFocus, setWarFocus] = useState(null);
+    const [history, setHistory] = useState([]); // snapshots per year for timeline scrub
+    const [scrubIndex, setScrubIndex] = useState(null); // null = live
     const worldPopRef = useRef([]);  // [{month, pop}] world-population sparkline
     const [lang, setLang] = useState(() => localStorage.getItem('worldsim_lang') || DEFAULT_LANG);
     const [user, setUser] = useState(null);  // {username, user_id} when logged in
@@ -137,6 +141,13 @@ export default function App() {
                     if (!last || last.month !== data.month) {
                         hist.push({ month: data.month, pop: Math.round(total) });
                         if (hist.length > 500) hist.splice(0, hist.length - 500);
+                    }
+                    if (data.month % 12 === 0) {
+                        setHistory(h => {
+                            if (h.length && h[h.length-1].month === data.month) return h;
+                            const next = [...h, data];
+                            return next.length > 200 ? next.slice(-200) : next;
+                        });
                     }
                 }
             };
@@ -314,6 +325,8 @@ export default function App() {
         );
     }
 
+    const displayTick = scrubIndex !== null ? (history[scrubIndex] || tick) : tick;
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
             <header style={{ ...header, padding: '4px 10px', gap: 8 }}>
@@ -345,7 +358,7 @@ export default function App() {
             <div style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative' }}>
                 <WorldMap
                     state={state}
-                    tick={tick}
+                    tick={displayTick || tick}
                     mapMode={mapMode}
                     onMapMode={setMapMode}
                     onSiteClick={(k) => { setSelected(k); setSelectedStats(null); }}
@@ -360,6 +373,7 @@ export default function App() {
                     canvasRef={mapCanvasRef}
                     followId={followId}
                     onFollowClear={() => setFollowId(null)}
+                    warFocus={warFocus}
                 />
                 {/* system toasts (prophecy resolutions, chat) */}
                 <div style={{ position: 'absolute', top: 40, right: 360, zIndex: 20, display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 340 }}>
@@ -375,7 +389,7 @@ export default function App() {
                     ))}
                 </div>
                 <Sidebar
-                    tick={tick}
+                    tick={displayTick || tick}
                     meta={meta}
                     paused={paused}
                     speed={speed}
@@ -391,9 +405,11 @@ export default function App() {
                     lang={lang}
                     followId={followId}
                     onFollow={setFollowId}
+                    onWarClick={setWarFocus}
                 />
             </div>
-            <WorldBar tick={tick} lang={lang} historyRef={worldPopRef} />
+            <Timeline history={history} currentMonth={tick?.month ?? 0} scrubIndex={scrubIndex} onScrub={setScrubIndex} />
+            <WorldBar tick={displayTick || tick} lang={lang} historyRef={worldPopRef} />
             {showLogin && (
                 <AuthModal
                     onClose={() => setShowLogin(false)}

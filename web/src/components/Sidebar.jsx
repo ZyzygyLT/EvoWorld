@@ -1,10 +1,11 @@
 import React from 'react';
 import RoomPanel from './RoomPanel.jsx';
+import Comparator from './Comparator.jsx';
 import { renderEvent, t, vocab } from '../i18n.js';
 
 /** Right sidebar: kingdoms list, ongoing wars, chronicle feed with filters.
  * (Per-kingdom stats live in the floating StatsPanel over the map.) */
-export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect, worldId, worldMode, claims, standings, onClaim, lang = 'es', followId = null, onFollow }) {
+export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect, worldId, worldMode, claims, standings, onClaim, lang = 'es', followId = null, onFollow, onWarClick }) {
     const [rankSort, setRankSort] = React.useState('points'); // points|pop|sites|tech|military
     const [rankFilter, setRankFilter] = React.useState('all'); // all|war|peace|tribal|civilized
     const [showKingdoms, setShowKingdoms] = React.useState(true);
@@ -114,6 +115,9 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                 );
             })()}
 
+            {/* comparador multi-línea */}
+            <Comparator tick={tick} />
+
             {/* fallen realms memorial: collapsed kingdoms, greyed out */}
             {((tick.fallen ?? []).length > 0 || tick.kingdoms.some(k => (k.sites?.length ?? 0) === 0)) && (
                 <div style={{ fontSize: 10, color: '#6e7681', margin: '2px 0 6px 2px' }}>
@@ -123,12 +127,12 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                 </div>
             )}
 
-            {/* ongoing wars: inline compact */}
+            {/* ongoing wars: inline compact — click to theater */}
             {tick.wars_ongoing.length > 0 && (
                 <div style={{ fontSize: 11, color: '#f85149', marginBottom: 4 }}>
                     {tick.wars_ongoing.map((w, i) => (
-                        <div key={i}>
-                            ⚔ {w.name}: {w.a} vs {w.b} ({w.battles}b, {w.dead} dead)
+                        <div key={i} onClick={() => onWarClick && onWarClick(w)} style={{ cursor: onWarClick ? 'pointer' : 'default', textDecoration: onWarClick ? 'underline' : 'none' }}>
+                            ⚔ {w.name}: {w.a} vs {w.b} ({w.battles}b, {w.dead} dead) {onWarClick ? ' →' : ''}
                         </div>
                     ))}
                 </div>
