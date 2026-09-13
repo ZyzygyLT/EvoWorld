@@ -129,7 +129,7 @@ export default function App() {
             const entry = worlds.find(w => w.id === id);
             const m = modeHint || entry?.mode || 'single';
             setWorldMode(m);
-            history.replaceState(null, '', `?world=${id}`);
+            window.history.replaceState(null, '', `?world=${id}`);
             const ws = new WebSocket(`ws://${location.host}/api/ws/${id}`);
             ws.onmessage = (m) => {
                 const data = JSON.parse(m.data);
@@ -250,7 +250,7 @@ export default function App() {
         setSelectedStats(null);
         setClaims([]);
         setStandings([]);
-        history.replaceState(null, '', location.pathname);
+        window.history.replaceState(null, '', location.pathname);
         refreshList();
     };
 
