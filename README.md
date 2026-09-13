@@ -79,6 +79,10 @@ $env:WORLDSIM_DB="postgresql+psycopg://user:pass@host/worldsim"
 | `GET/DELETE /api/worlds/{id}` | snapshot completo / borrar |
 | `GET /api/worlds/{id}/stats/{kid}` | estadísticas ricas de un reino |
 | `WS /api/ws/{id}` | stream en vivo: `{speed, pause, selected}` |
+| `POST /api/worlds/{id}/claims` | reclamar reino en liga (1 por usuario) |
+| `GET /api/worlds/{id}/standings` | leaderboard de la liga |
+
+Seed sharing: cada mundo tiene URL `http://localhost:5173/?world=ID` — el botón **🔗 invite** copia el link. El `seed` está en el snapshot (`/api/worlds/{id}` → `seed`); recrear con `POST /api/worlds {"seed": 42}` genera el mismo mundo determinista.
 
 ## Créditos
 

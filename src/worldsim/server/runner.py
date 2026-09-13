@@ -88,11 +88,18 @@ class WorldRunner:
                     self.eng.tick()
                 resolved = resolve_pending(self.world_id, self.eng)
                 if resolved:
-                    for r in resolved:
+                    if len(resolved) == 1:
+                        r = resolved[0]
                         self._broadcast_system(
                             f"★ Prophecy resolved: {r['user_name']} — {r['text']} "
                             f"(+{r['points']} pts)"
                         )
+                    else:
+                        lines = "\n".join(
+                            f"★ {r['user_name']}: {r['text']} (+{r['points']})"
+                            for r in resolved
+                        )
+                        self._broadcast_system(f"{len(resolved)} prophecies resolved:\n{lines}")
                 self._broadcast_league_scores()
                 self._check_season_end()
                 self._broadcast_tick()
@@ -131,13 +138,15 @@ class WorldRunner:
         self._send_all(payload)
 
     def _broadcast_league_scores(self) -> None:
-        """Score claims since the last cursor and toast the owners."""
+        """Score claims since the last cursor and toast the owners (batched)."""
         from worldsim.server.league import score_new_events
 
         messages = score_new_events(self.world_id, self.eng, self._last_score_month)
         self._last_score_month = self.eng.month
-        for m in messages:
-            self._broadcast_system(m)
+        if len(messages) == 1:
+            self._broadcast_system(messages[0])
+        elif messages:
+            self._broadcast_system("\n".join(messages))
 
     def _check_season_end(self) -> None:
         """Freeze league worlds at season_years and crown the champion."""

@@ -703,10 +703,23 @@ class SimEngine:
     def _update_relations(self) -> None:
         """Scan neighbor kingdoms; degrade relations toward tension/war (GDD §6)."""
         active = [k for k in self.kingdoms if k.sites]
+        # Precompute bounding boxes for spatial index (avoids O(n²·sites²) when kingdoms far apart)
+        bboxes = {}
+        for k in active:
+            xs = [s.x for s in k.sites]
+            ys = [s.y for s in k.sites]
+            bboxes[k.id] = (min(xs), max(xs), min(ys), max(ys))
         for i, a in enumerate(active):
             for b in active[i + 1 :]:
                 current = self.get_relation(a, b)
                 if current == Relation.WAR:
+                    continue
+                # spatial index: if bounding boxes separated by > WAR_DISTANCE, no contact possible
+                ax0, ax1, ay0, ay1 = bboxes[a.id]
+                bx0, bx1, by0, by1 = bboxes[b.id]
+                if ax1 + WAR_DISTANCE < bx0 or bx1 + WAR_DISTANCE < ax0:
+                    continue
+                if ay1 + WAR_DISTANCE < by0 or by1 + WAR_DISTANCE < ay0:
                     continue
                 # contact?
                 contact = False

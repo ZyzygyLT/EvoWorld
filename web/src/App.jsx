@@ -385,6 +385,7 @@ export default function App() {
                             padding: '6px 10px',
                             fontSize: 12,
                             color: '#f0c674',
+                            whiteSpace: 'pre-wrap',
                         }}>{t.text}</div>
                     ))}
                 </div>
