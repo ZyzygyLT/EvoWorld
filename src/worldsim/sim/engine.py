@@ -1626,6 +1626,10 @@ class SimEngine:
         much further than a Stone Age tribe). Produces province-like
         political maps (GDD: heatmap of the realms).
         """
+        # cache per-month + tech state — called repeatedly per tick
+        tech_sig = tuple((k.tech_level, k.mods.get("influence", 0.0)) for k in self.kingdoms)
+        if hasattr(self, "_inf_cache_month") and self._inf_cache_month == self.month and hasattr(self, "_inf_cache_sig") and self._inf_cache_sig == tech_sig and hasattr(self, "_inf_cache"):
+            return self._inf_cache
         h, w = self.world.height.shape
         best_d = np.full((h, w), np.iinfo(np.int32).max, dtype=np.int32)
         out = np.full((h, w), -1, dtype=np.int16)
@@ -1651,6 +1655,9 @@ class SimEngine:
                 sub_d[upd] = window_d[upd]
                 sub_o[upd] = k.id
         out[~land] = -1
+        self._inf_cache = out
+        self._inf_cache_month = self.month
+        self._inf_cache_sig = tech_sig
         return out
 
     def battle_heat(self) -> np.ndarray:

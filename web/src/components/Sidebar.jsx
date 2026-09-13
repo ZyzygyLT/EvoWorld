@@ -99,7 +99,7 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                                 >◎</button>
                             </div>
                             <div style={{ fontSize: 12, color: '#8b949e' }}>
-                                {vocab(lang, k.race)} · {vocab(lang, k.government)}{k.golden_age ? ' ✨' : ''} · {vocab(lang, ['Stone Age', 'Bronze Age', 'Iron Age', 'Classical Era', 'Medieval Era'][k.tech_level] ?? '')}
+                                {vocab(lang, k.race)} · {vocab(lang, k.government)}{k.golden_age ? ' ✨' : ''} · {vocab(lang, ['Stone Age', 'Bronze Age', 'Iron Age', 'Classical Era', 'Medieval Era', 'Renaissance', 'Enlightenment'][k.tech_level] ?? '')}
                             </div>
                             <div style={{ fontSize: 12, color: '#c9d1d9' }}>pop {k.population.toLocaleString()} · {k.sites.length} aldeas · mil {k.military_power ?? '?'}</div>
                             {k.leader && (
@@ -201,7 +201,8 @@ function ChronicleFeed({ events, lang, tick }) {
         WAR: e => ['WAR_DECLARED', 'BATTLE', 'WAR_ENDED', 'SITE_CAPTURED', 'ALLIANCE_JOINED_WAR'].includes(e.type),
         LEADER: e => ['LEADER_CROWNED', 'LEADER_DIED', 'GOVERNMENT_CHANGED', 'HERO_EMERGED', 'HERO_FELL'].includes(e.type),
         BEAST: e => ['BEAST_SIGHTED', 'BEAST_SLAIN', 'BEAST_RAMPAGE'].includes(e.type),
-        ERA: e => ['TECH_ERA', 'GOLDEN_AGE', 'PLAGUE', 'COLONY_FOUNDED', 'INDEPENDENCE', 'REBELLION'].includes(e.type),
+        PROGRESS: e => ['TECH_ERA', 'TECH_DISCOVERY', 'GOLDEN_AGE'].includes(e.type),
+        COLONY: e => ['COLONY_FOUNDED', 'INDEPENDENCE', 'REBELLION', 'PLAGUE'].includes(e.type),
     };
     const shown = events.filter(FILTERS[filter]);
     React.useEffect(() => {
@@ -227,6 +228,7 @@ function ChronicleFeed({ events, lang, tick }) {
                 {Object.keys(FILTERS).map(f => (
                     <button
                         key={f}
+                        title={f}
                         style={{ ...btn, fontSize: 10, padding: '1px 5px',
                                  background: filter === f ? '#2f81f7' : btn.background }}
                         onClick={() => setFilter(f)}
@@ -235,7 +237,9 @@ function ChronicleFeed({ events, lang, tick }) {
                          f === 'MILESTONE' ? '★' :
                          f === 'WAR' ? '⚔' :
                          f === 'LEADER' ? '♛' :
-                         f === 'BEAST' ? '▲' : '✦'}
+                         f === 'BEAST' ? '▲' :
+                         f === 'PROGRESS' ? '⬢' :
+                         f === 'COLONY' ? '⛵' : '✦'}
                     </button>
                 ))}
             </div>

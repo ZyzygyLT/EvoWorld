@@ -16,10 +16,16 @@ export default function Timeline({ history, currentMonth, scrubIndex, onScrub })
             </span>
             <button onClick={() => onScrub(null)} style={btn} disabled={isLive}>Live</button>
             <div style={{ display: 'flex', gap: 2, marginLeft: 8 }}>
-                {history.filter((_,i)=>i%10===0).slice(-12).map((h,i)=> (
-                    <div key={i} title={`Año ${Math.floor(h.month/12)}`}
-                        style={{ width: 12, height: 18, background: `hsl(${120 + h.kingdoms.length*15},60%,40%)`, borderRadius: 2, opacity: 0.8 }} />
-                ))}
+                {(() => {
+                    const n = history.length;
+                    const dots = 24;
+                    const step = Math.max(1, Math.floor(n / dots));
+                    const sampled = history.filter((_,i)=> i % step === 0).slice(-dots);
+                    return sampled.map((h,i)=> (
+                        <div key={i} title={`Año ${Math.floor(h.month/12)} — ${h.kingdoms.length} reinos`}
+                            style={{ width: 8, height: 18, background: `hsl(${120 + h.kingdoms.length*8},60%,40%)`, borderRadius: 2, opacity: 0.85, border: i===sampled.length-1 ? '1px solid #58a6ff' : 'none' }} />
+                    ));
+                })()}
             </div>
         </div>
     );

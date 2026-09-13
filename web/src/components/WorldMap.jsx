@@ -392,7 +392,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     // biome name for hover tooltip (IDs: 0-6, 8-16; 7 unused)
     const BIOME_LABELS = {
         0: 'OCEAN', 1: 'SWAMP', 2: 'MARSH', 3: 'GRASSLAND', 4: 'DESERT',
-        5: 'CONIFER FOREST', 6: 'BROADLEAF FOREST', 8: 'BADLANDS', 9: 'MOUNTAIN',
+        5: 'CONIFER FOREST', 6: 'BROADLEAF FOREST', 7: 'WASTELAND', 8: 'BADLANDS', 9: 'MOUNTAIN',
         10: 'PEAK', 11: 'ICE', 12: 'ICE', 13: 'ICE', 14: 'SMALL HILLS',
         15: 'SHRUBLAND', 16: 'HILL',
     };
