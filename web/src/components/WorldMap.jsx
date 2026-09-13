@@ -7,7 +7,7 @@ import StatsPanel from './StatsPanel.jsx';
  * Canvas world map with pan/zoom + political overlay + site markers.
  * Re-fits the camera on every world load; survives canvas resizes.
  */
-export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection, claims = [], worldMode = 'single', onClaim, lang = 'es', canvasRef: externalRef, followId = null, onFollowClear, warFocus = null }) {
+export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection, claims = [], worldMode = 'single', onClaim, lang = 'es', canvasRef: externalRef, followId = null, onFollowClear, warFocus = null, fixed = true, onToggleFixed }) {
     const canvasRef = useRef(null);
     // expose the canvas for PNG export
     useEffect(() => {
@@ -319,9 +319,20 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     }
 
     function fitInhabited(canvas) {
-        // FIJO a pedido: siempre mundo completo, sin zoom al bbox habitado.
-        // No crece el cuadrado con el contenido; escala fija contenida.
-        return fitView(canvas);
+        if (fixed) return fitView(canvas);
+        // libre: encuadre al bbox habitado con 1.35x
+        const pts = [];
+        for (const k of state?.kingdoms ?? []) for (const s of k.sites ?? []) pts.push([s.x, s.y]);
+        for (const k of tick?.kingdoms ?? []) for (const s of k.sites ?? []) pts.push([s.x, s.y]);
+        if (!pts.length) return fitView(canvas);
+        let x0 = W, y0 = H, x1 = 0, y1 = 0;
+        for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+        const M = 10; x0 = Math.max(0, x0 - M); y0 = Math.max(0, y0 - M); x1 = Math.min(W - 1, x1 + M); y1 = Math.min(H - 1, y1 + M);
+        const bw = Math.max(8, x1 - x0 + 1), bh = Math.max(8, y1 - y0 + 1);
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        const contained = Math.min(canvas.width / bw, canvas.height / bh);
+        const scale = Math.min(contained * 1.35, 18);
+        return { scale, x: canvas.width / 2 - cx * scale, y: canvas.height / 2 - cy * scale };
     }
 
     function clampView(canvas, v) {
@@ -369,9 +380,40 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
 
     useEffect(() => { draw(); }, [tick, draw]);
 
-    // follow-cam / war theater deshabilitados: mapa fijo no hace pan automático
-    useEffect(() => {}, [tick, followId, draw]);
-    useEffect(() => {}, [warFocus, draw]);
+    // toggle fijo/libre: re-encuadra al cambiar
+    useEffect(() => {
+        viewRef.current = null;
+        draw();
+    }, [fixed, draw]);
+
+    // follow-cam / war theater: solo en modo libre, en fijo el mapa no se mueve
+    useEffect(() => {
+        if (fixed) return;
+        if (followId == null || !tick) return;
+        const k = tick.kingdoms?.find(k => k.id === followId);
+        const cap = k?.sites?.find(s => s.is_capital) ?? k?.sites?.[0];
+        const canvas = canvasRef.current;
+        if (!cap || !canvas || !viewRef.current) return;
+        viewRef.current.x = canvas.width / 2 - (cap.x + 0.5) * viewRef.current.scale;
+        viewRef.current.y = canvas.height / 2 - (cap.y + 0.5) * viewRef.current.scale;
+        clampView(canvas, viewRef.current);
+        draw();
+    }, [tick, followId, draw, fixed]);
+    useEffect(() => {
+        if (fixed) return;
+        if (!warFocus || !tick) return;
+        const ka = tick.kingdoms?.find(k => k.name === warFocus.a);
+        const kb = tick.kingdoms?.find(k => k.name === warFocus.b);
+        const ca = ka?.sites?.find(s => s.is_capital) ?? ka?.sites?.[0];
+        const cb = kb?.sites?.find(s => s.is_capital) ?? kb?.sites?.[0];
+        const canvas = canvasRef.current;
+        if (!ca || !cb || !canvas || !viewRef.current) return;
+        const mx = (ca.x + cb.x)/2 + 0.5, my = (ca.y + cb.y)/2 + 0.5;
+        viewRef.current.x = canvas.width / 2 - mx * viewRef.current.scale;
+        viewRef.current.y = canvas.height / 2 - my * viewRef.current.scale;
+        clampView(canvas, viewRef.current);
+        draw();
+    }, [warFocus, draw, fixed]);
 
     // "F" re-fits the camera to the whole map (and breaks follow-cam)
     useEffect(() => {
@@ -424,8 +466,13 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
             const d = dragRef.current;
             if (Math.abs(e.clientX - d.px) + Math.abs(e.clientY - d.py) > 3) {
                 d.moved = true;
+                if (!fixed && onFollowClear) onFollowClear();
             }
-            // mapa fijo: sin pan — solo detectar click vs drag
+            if (fixed) return;
+            viewRef.current.x = d.vx + (e.clientX - d.px);
+            viewRef.current.y = d.vy + (e.clientY - d.py);
+            clampView(canvasRef.current, viewRef.current);
+            draw();
             return;
         } else {
             const g = toGrid(e);
@@ -478,14 +525,32 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         }
     };
     const onWheel = (e) => {
+        if (fixed) { e.preventDefault(); return; }
         e.preventDefault();
-        // zoom deshabilitado a pedido: mapa fijo, sin escala
+        const canvas = canvasRef.current;
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        const v = viewRef.current;
+        const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+        const fit = Math.min(canvas.width / W, canvas.height / H);
+        const ns = Math.max(fit, Math.min(32, v.scale * factor));
+        v.x = mx - ((mx - v.x) * ns) / v.scale;
+        v.y = my - ((my - v.y) * ns) / v.scale;
+        v.scale = ns;
+        clampView(canvas, v);
+        draw();
     };
 
     return (
         <div style={{ flex: 1, position: 'relative', minWidth: 0, minHeight: 0, height: '100%', overflow: 'hidden' }}>
-            {/* map mode selector */}
+            {/* map mode + fixed toggle */}
             <div style={{ position: 'absolute', top: 6, left: 6, zIndex: 5, display: 'flex', gap: 4 }}>
+                {onToggleFixed && (
+                    <button onClick={onToggleFixed} title={fixed ? 'modo libre (pan/zoom)' : 'modo fijo'}
+                        style={{ background: fixed ? '#161b22e0' : '#2f81f7', border: '1px solid #30363d', color: fixed ? '#8b949e' : '#fff', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 12 }}>
+                        {fixed ? '🔒 fijo' : '🔓 libre'}
+                    </button>
+                )}
                 {['biome', 'realms', 'political', 'battles'].map(m => (
                     <button
                         key={m}
@@ -505,7 +570,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
             </div>
             <canvas
                 ref={canvasRef}
-                style={{ width: '100%', height: '100%', cursor: 'pointer', display: 'block' }}
+                style={{ width: '100%', height: '100%', cursor: fixed ? 'pointer' : 'grab', display: 'block' }}
                 onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
                 onMouseLeave={onUp} onWheel={onWheel}
             />

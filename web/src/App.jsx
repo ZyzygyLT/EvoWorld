@@ -32,6 +32,7 @@ export default function App() {
     const [warFocus, setWarFocus] = useState(null);
     const [history, setHistory] = useState([]); // snapshots per year for timeline scrub
     const [scrubIndex, setScrubIndex] = useState(null); // null = live
+    const [mapFixed, setMapFixed] = useState(true); // 🔒 fijo por defecto a pedido
     const worldPopRef = useRef([]);  // [{month, pop}] world-population sparkline
     const [lang, setLang] = useState(() => localStorage.getItem('worldsim_lang') || DEFAULT_LANG);
     const [user, setUser] = useState(null);  // {username, user_id} when logged in
@@ -344,7 +345,7 @@ export default function App() {
                             title="copy shareable room link">🔗 invite</button>
                 )}
                 <span style={{ color: '#8b949e', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {worldMode === 'league' ? '👑 league' : '👁'} · pan · wheel · F · click
+                    {worldMode === 'league' ? '👑 league' : '👁'} · {mapFixed ? 'fijo' : 'libre'} · F · click
                 </span>
                 <span style={{ flex: 1 }} />
                 <button style={{ ...btn, fontSize: 11, padding: '2px 8px' }} onClick={exportPng} title="download map PNG">📷</button>
@@ -381,6 +382,8 @@ export default function App() {
                     followId={followId}
                     onFollowClear={() => setFollowId(null)}
                     warFocus={warFocus}
+                    fixed={mapFixed}
+                    onToggleFixed={() => setMapFixed(v => !v)}
                 />
                 {/* system toasts (prophecy resolutions, chat) */}
                 <div style={{ position: 'absolute', top: 40, right: 360, zIndex: 20, display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 340 }}>
