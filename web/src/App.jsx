@@ -316,22 +316,18 @@ export default function App() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-            <header style={header}>
-                <strong style={{ color: '#58a6ff' }}>worldsim</strong>
-                <button style={btn} onClick={backToMenu}>‹ worlds</button>
+            <header style={{ ...header, padding: '4px 10px', gap: 8 }}>
+                <strong style={{ color: '#58a6ff', fontSize: 15 }}>worldsim</strong>
+                <button style={{ ...btn, fontSize: 11, padding: '2px 8px' }} onClick={backToMenu}>‹ worlds</button>
                 {worldMode === 'league' && (
-                    <button style={{ ...btn, fontSize: 12 }} onClick={copyInvite}
-                            title="copy shareable room link">
-                        🔗 invite
-                    </button>
+                    <button style={{ ...btn, fontSize: 11, padding: '2px 8px' }} onClick={copyInvite}
+                            title="copy shareable room link">🔗 invite</button>
                 )}
-                <span style={{ color: '#8b949e', fontSize: 12 }}>
-                    {worldMode === 'league' ? '👑 dynasty league' : '👁 observing'} · drag pan · wheel zoom · F re-fit · click site/kingdom
+                <span style={{ color: '#8b949e', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {worldMode === 'league' ? '👑 league' : '👁'} · pan · wheel · F · click
                 </span>
                 <span style={{ flex: 1 }} />
-                <button style={{ ...btn, fontSize: 12 }} onClick={exportPng} title="download map PNG">
-                    {t(lang, 'exportPng')}
-                </button>
+                <button style={{ ...btn, fontSize: 11, padding: '2px 8px' }} onClick={exportPng} title="download map PNG">📷</button>
                 <LangToggle lang={lang} onChange={setLangAndSave} />
                 <AuthButton user={user} onLogin={() => setShowLogin(true)} onLogout={doLogout} t={(k) => t(lang, k)} />
             </header>

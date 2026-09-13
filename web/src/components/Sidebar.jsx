@@ -6,6 +6,7 @@ import { renderEvent, t, vocab } from '../i18n.js';
  * (Per-kingdom stats live in the floating StatsPanel over the map.) */
 export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, selected, onSelect, worldId, worldMode, claims, standings, onClaim, lang = 'es', followId = null, onFollow }) {
     const [rankSort, setRankSort] = React.useState('points'); // points|pop|sites|tech|military
+    const [rankFilter, setRankFilter] = React.useState('all'); // all|war|peace|tribal|civilized
     const [showKingdoms, setShowKingdoms] = React.useState(true);
     const [showRoom, setShowRoom] = React.useState(false);
     if (!tick) return <aside style={aside}>waiting for simulation…</aside>;
@@ -39,7 +40,12 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
             </div>
             {showKingdoms && (() => {
                 const sortKey = rankSort;
-                const sorted = [...tick.kingdoms.filter(k => (k.sites?.length ?? 0) > 0)].sort((a,b) => {
+                let filtered = [...tick.kingdoms.filter(k => (k.sites?.length ?? 0) > 0)];
+                if (rankFilter === 'war') filtered = filtered.filter(k => k.at_war);
+                else if (rankFilter === 'peace') filtered = filtered.filter(k => !k.at_war);
+                else if (rankFilter === 'tribal') filtered = filtered.filter(k => k.government === 'Tribal');
+                else if (rankFilter === 'civilized') filtered = filtered.filter(k => k.government !== 'Tribal');
+                const sorted = filtered.sort((a,b) => {
                     if (sortKey === 'pop') return b.population - a.population;
                     if (sortKey === 'sites') return b.sites.length - a.sites.length;
                     if (sortKey === 'tech') return (b.tech_level ?? 0) - (a.tech_level ?? 0);
@@ -61,6 +67,14 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                         ].map(([k,label]) => (
                             <button key={k} onClick={()=>setRankSort(k)}
                                 style={{ ...btn, fontSize: 10, padding: '1px 6px', background: rankSort===k ? '#2f81f7' : btn.background }}>{label}</button>
+                        ))}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
+                        {[
+                            ['all','Todos'],['war','⚔ Guerra'],['peace','☮ Paz'],['civilized','Civil'],['tribal','Tribal'],
+                        ].map(([k,label]) => (
+                            <button key={k} onClick={()=>setRankFilter(k)}
+                                style={{ ...btn, fontSize: 10, padding: '1px 6px', background: rankFilter===k ? '#2f81f7' : btn.background }}>{label}</button>
                         ))}
                     </div>
                     <div style={{ maxHeight: 320, overflowY: 'auto' }}>

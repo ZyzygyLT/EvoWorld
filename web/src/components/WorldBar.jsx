@@ -32,7 +32,7 @@ export default function WorldBar({ tick, lang = 'es', historyRef }) {
 }
 
 function WorldSpark({ values }) {
-    const W = 110, H = 22;
+    const W = 160, H = 28;
     const lo = Math.min(...values);
     const hi = Math.max(...values);
     const rng = Math.max(1, hi - lo);
@@ -42,8 +42,8 @@ function WorldSpark({ values }) {
         return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ');
     return (
-        <svg width={W} height={H} style={{ background: '#0a0e14', borderRadius: 3 }}>
-            <polyline points={pts} fill="none" stroke="#58a6ff" strokeWidth="1.2" />
+        <svg width={W} height={H} style={{ background: '#0a0e14', borderRadius: 3, flexShrink: 0 }}>
+            <polyline points={pts} fill="none" stroke="#58a6ff" strokeWidth="1.4" />
         </svg>
     );
 }
@@ -51,11 +51,12 @@ function WorldSpark({ values }) {
 const bar = {
     display: 'flex',
     alignItems: 'center',
-    gap: 14,
-    padding: '4px 12px',
+    gap: 16,
+    padding: '6px 14px',
     background: '#161b22',
     borderTop: '1px solid #21262d',
-    fontSize: 12,
+    fontSize: 13,
     color: '#c9d1d9',
     flexShrink: 0,
+    minHeight: 32,
 };

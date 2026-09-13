@@ -517,7 +517,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
     };
 
     return (
-        <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+        <div style={{ flex: 1, position: 'sticky', top: 0, height: 'calc(100vh - 72px)', minWidth: 0, overflow: 'hidden', alignSelf: 'flex-start' }}>
             {/* map mode selector */}
             <div style={{ position: 'absolute', top: 6, left: 6, zIndex: 5, display: 'flex', gap: 4 }}>
                 {['biome', 'realms', 'political', 'battles'].map(m => (
