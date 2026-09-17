@@ -75,6 +75,9 @@ def engine_to_dict(engine: SimEngine) -> dict:
                 "faith": k.faith,
                 "temples": sorted(k.temples),
                 "trade_routes": sorted(k.trade_routes),
+                "wars_won": k.wars_won,
+                "wars_lost": k.wars_lost,
+                "civilized": k.civilized,
                 "founded_month": k.founded_month,
                 "territory": (engine.territory_map() == k.id).astype(int).tolist(),
             }
