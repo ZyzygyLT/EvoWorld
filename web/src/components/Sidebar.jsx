@@ -1,6 +1,5 @@
 import React from 'react';
-import RoomPanel from './RoomPanel.jsx';
-import { renderEvent, t, vocab } from '../i18n.js';
+import { t, vocab } from '../i18n.js';
 
 /**
  * Right sidebar — compact ranking with slim per-filter views + hitos.
@@ -12,7 +11,6 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
     const [rankSort, setRankSort] = React.useState('points'); // points|pop|sites|tech|military|politics
     const [rankFilter, setRankFilter] = React.useState('all'); // all|war|peace|tribal|civilized
     const [showKingdoms, setShowKingdoms] = React.useState(true);
-    const [showRoom, setShowRoom] = React.useState(false);
     const sortedKingdoms = React.useMemo(() => {
         if (!tick) return [];
         let filtered = [...tick.kingdoms.filter(k => (k.sites?.length ?? 0) > 0)];
@@ -78,8 +76,8 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                                 style={{ ...btn, fontSize: 10, padding: '1px 6px', background: rankFilter === k ? '#2f81f7' : btn.background }}>{label}</button>
                         ))}
                     </div>
-                    <div>
-                        {sortedKingdoms.slice(0, 3).map((k, idx) => {
+                    <div style={{ maxHeight: 320, overflowY: 'auto', paddingRight: 2 }}>
+                        {sortedKingdoms.map((k, idx) => {
                             const pts = standings?.find(s => s.kingdom_id === k.id)?.points;
                             return (
                                 <div
@@ -98,23 +96,18 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                                         >◎</button>
                                     </div>
                                     <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>
-                                        {rankSort === 'pop' && <span>pop <b style={{ color: '#c9d1d9' }}>{k.population.toLocaleString()}</b> · {k.sites.length} aldeas</span>}
-                                        {rankSort === 'sites' && <span><b style={{ color: '#c9d1d9' }}>{k.sites.length}</b> aldeas · pop {k.population.toLocaleString()}</span>}
-                                        {rankSort === 'tech' && <span>{vocab(lang, ERA_NAMES[k.tech_level] ?? '')} · {k.sites.length} sites · pop {k.population.toLocaleString()}</span>}
-                                        {rankSort === 'military' && <span>mil <b style={{ color: '#c9d1d9' }}>{k.military_power ?? '?'}</b> · {k.sites.length} aldeas · {vocab(lang, k.race)}</span>}
-                                        {rankSort === 'politics' && <span>{vocab(lang, k.government)}{k.civilized ? ' · civ' : ''} · felicidad {Math.round(k.happiness ?? 50)}% · {vocab(lang, k.race)}</span>}
+                                        {rankSort === 'pop' && <span><b style={{ color: '#c9d1d9' }}>{k.population.toLocaleString()}</b> hab · {k.sites.length} {k.sites.length === 1 ? 'aldea' : 'aldeas'}</span>}
+                                        {rankSort === 'sites' && <span><b style={{ color: '#c9d1d9' }}>{k.sites.length}</b> {k.sites.length === 1 ? 'aldea' : 'aldeas'}</span>}
+                                        {rankSort === 'tech' && <span>{vocab(lang, ERA_NAMES[k.tech_level] ?? '')}</span>}
+                                        {rankSort === 'military' && <span><b style={{ color: '#c9d1d9' }}>{k.military_power ?? '?'}</b> poder</span>}
+                                        {rankSort === 'politics' && <span>{vocab(lang, k.government)} · {Math.round(k.happiness ?? 50)}% {lang === 'es' ? 'felicidad' : 'happiness'}</span>}
                                         {rankSort === 'points' && (
-                                            <span>{vocab(lang, k.race)} · {vocab(lang, k.government)}{k.golden_age ? ' ✨' : ''} · pop {k.population.toLocaleString()}</span>
+                                            <span>{vocab(lang, k.race)} · {vocab(lang, k.government)}{k.golden_age ? ' ✨' : ''}</span>
                                         )}
                                     </div>
                                 </div>
                             );
                         })}
-                        {sortedKingdoms.length > 3 && (
-                            <div style={{ fontSize: 10, color: '#6e7681', textAlign: 'center', marginTop: 4 }}>
-                                +{sortedKingdoms.length - 3} más — usa los filtros para ver otros
-                            </div>
-                        )}
                         {sortedKingdoms.length === 0 && (
                             <div style={{ fontSize: 11, color: '#6e7681', fontStyle: 'italic', textAlign: 'center', marginTop: 4 }}>Sin reinos en este filtro</div>
                         )}
@@ -154,37 +147,22 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
 
 function HitosPanel({ tick, lang }) {
     const [open, setOpen] = React.useState(true);
-    const milestones = tick.milestones ?? [];
     const records = React.useMemo(() => computeRecords(tick), [tick]);
+    if (!records.length) return null;
     return (
         <>
             <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
                 <button style={{ ...btn, fontSize: 11, flex: 1 }} onClick={() => setOpen(o => !o)}>
-                    {open ? '▾' : '▸'} {t(lang, 'milestones')} ({milestones.length})
+                    {open ? '▾' : '▸'} {t(lang, 'records')} ({records.length})
                 </button>
             </div>
             {open && (
                 <div style={{ maxHeight: 300, overflowY: 'auto', marginTop: 4, border: '1px solid #21262d', borderRadius: 4, padding: '6px 8px', background: '#161b22' }}>
-                    {milestones.length === 0 && (
-                        <div style={{ fontSize: 11, color: '#6e7681', fontStyle: 'italic' }}>
-                            {lang === 'es' ? 'Aún no hay hitos — la historia se escribe…' : 'No milestones yet — history is being written…'}
-                        </div>
-                    )}
-                    {milestones.slice().reverse().map((e, _idx) => (
-                        <div key={e.id ?? `${_idx}-${e.month}-${e.type}`} style={{ fontSize: 11, marginBottom: 3, color: '#f0c674' }}>
-                            <span style={{ color: '#58a6ff' }}>[y{Math.floor(e.month / 12)}]</span>{' '}{renderEvent(lang, e)}
+                    {records.map((r, i) => (
+                        <div key={i} style={{ fontSize: 11, marginBottom: 2 }}>
+                            <span style={{ color: '#d2a8ff' }}>{r.icon} {r.label}:</span>{' '}{r.value}
                         </div>
                     ))}
-                    {records.length > 0 && (
-                        <>
-                            <div style={{ ...sectionTitle, fontSize: 11 }}>{t(lang, 'records')}</div>
-                            {records.map((r, i) => (
-                                <div key={i} style={{ fontSize: 11, marginBottom: 2 }}>
-                                    <span style={{ color: '#d2a8ff' }}>{r.icon} {r.label}:</span>{' '}{r.value}
-                                </div>
-                            ))}
-                        </>
-                    )}
                 </div>
             )}
         </>

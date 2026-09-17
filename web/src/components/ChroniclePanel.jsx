@@ -18,6 +18,7 @@ export default function ChroniclePanel({ events, lang = 'es', tick }) {
         PROGRESS: e => ['TECH_ERA', 'TECH_DISCOVERY', 'GOLDEN_AGE'].includes(e.type),
         COLONY: e => ['COLONY_FOUNDED', 'KINGDOM_FOUNDED', 'SITE_FOUNDED', 'INDEPENDENCE', 'REBELLION'].includes(e.type),
         DISASTER: e => ['DROUGHT', 'FLOOD', 'FAMINE', 'EARTHQUAKE', 'PLAGUE'].includes(e.type),
+        HITOS: e => e.type === 'MILESTONE',
     };
 
     const list = events ?? [];
@@ -48,18 +49,18 @@ export default function ChroniclePanel({ events, lang = 'es', tick }) {
                     <button
                         key={f}
                         onClick={() => setFilter(f)}
-                        title={`${f} (${counts[f]})`}
+                        title={`${label(f, lang)} (${counts[f]})`}
                         style={{
                             ...fBtn,
                             background: filter === f ? '#2f81f7' : '#21262d',
                             color: filter === f ? '#fff' : '#8b949e',
                         }}
                     >
-                        {label(f)} <span style={{ opacity: 0.7, fontSize: 9 }}>{counts[f] || ''}</span>
+                        {label(f, lang)} <span style={{ opacity: 0.7, fontSize: 9 }}>{counts[f] || ''}</span>
                     </button>
                 ))}
                 <span style={{ fontSize: 9, color: autoScroll ? '#58a6ff' : '#6e7681', marginLeft: 6 }}>
-                    {autoScroll ? 'auto ▼' : '▲'}
+                    {lang === 'es' ? (autoScroll ? 'auto ▼' : '▲ pausa') : (autoScroll ? 'auto ▼' : '▲ paused')}
                 </span>
             </div>
             <div ref={boxRef} onScroll={onScroll} style={feed}>
@@ -88,15 +89,17 @@ export default function ChroniclePanel({ events, lang = 'es', tick }) {
     );
 }
 
-function label(f) {
-    return f === 'ALL' ? 'all'
-        : f === 'WAR' ? '⚔'
-        : f === 'LEADER' ? '♛'
-        : f === 'BEAST' ? '▲'
-        : f === 'PROGRESS' ? '⬢'
-        : f === 'COLONY' ? '⛵'
-        : f === 'DISASTER' ? '☠'
-        : f;
+function label(f, lang) {
+    // lang is optional — icons are universal, text labels translate
+    if (f === 'ALL') return lang === 'es' ? 'todos' : 'all';
+    if (f === 'HITOS') return '★';
+    if (f === 'WAR') return '⚔';
+    if (f === 'LEADER') return '♛';
+    if (f === 'BEAST') return '▲';
+    if (f === 'PROGRESS') return '⬢';
+    if (f === 'COLONY') return '⛵';
+    if (f === 'DISASTER') return '☠';
+    return f;
 }
 
 function coloredParts(text, tick) {
