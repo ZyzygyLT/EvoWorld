@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import WorldMap from './components/WorldMap.jsx';
 import Sidebar from './components/Sidebar.jsx';
+import ChroniclePanel from './components/ChroniclePanel.jsx';
 import StartScreen from './components/StartScreen.jsx';
 import Timeline from './components/Timeline.jsx';
 import WorldBar from './components/WorldBar.jsx';
@@ -40,8 +41,13 @@ export default function App() {
     const [showMine, setShowMine] = useState(false);
     const [showTutorial, setShowTutorial] = useState(
         () => !localStorage.getItem('worldsim_tutorial_done'));
+    const [createError, setCreateError] = useState(null);
+    const [wsStatus, setWsStatus] = useState('disconnected'); // connected|disconnected|reconnecting
     const wsRef = useRef(null);
     const mapCanvasRef = useRef(null);
+    const addToast = React.useCallback((text) => {
+        setToasts(t => [...t.slice(-3), { id: Date.now() + Math.random(), text }]);
+    }, []);
 
     // toasts fade after 6 seconds
     useEffect(() => {
@@ -83,16 +89,9 @@ export default function App() {
                 .then(me => { if (me) setUser({ username: me.username, user_id: me.user_id }); })
                 .catch(() => {});
         }
-        // deep link: ?world=N opens that world straight away
+        // deep link: ?world=N opens that world straight away — no auto-open otherwise (lobby first)
         const q = new URLSearchParams(location.search).get('world');
-        if (q) {
-            openStream(parseInt(q, 10));
-        } else {
-            // auto-open latest world if none selected (avoids "waiting" limbo)
-            fetch('/api/worlds').then(r => r.json()).then(ws => {
-                if (ws.length && !worldId) openStream(ws[0].id);
-            }).catch(() => {});
-        }
+        if (q) openStream(parseInt(q, 10));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -110,6 +109,8 @@ export default function App() {
 
     const openStream = (id, modeHint) => {
         if (wsRef.current) wsRef.current.close();
+        worldPopRef.current = [];
+        setWsStatus('disconnected');
         // refresh the world list first: mode must come from fresh data,
         // otherwise deep-linked league worlds render as single-player
         fetch('/api/worlds').then(r => r.json()).then(ws => {
@@ -126,41 +127,63 @@ export default function App() {
             setSelectedStats(null);
             setClaims([]);
             setStandings([]);
-            // world mode for conditional UI (dynasty tab, claim buttons)
-            const entry = worlds.find(w => w.id === id);
-            const m = modeHint || entry?.mode || 'single';
-            setWorldMode(m);
+            // world mode already set from fresh fetch above; just ensure fallback
+            if (!modeHint) {
+                // use the fresh list if available (first fetch may not have returned yet)
+                fetch('/api/worlds').then(r => r.json()).then(ws2 => {
+                    const e2 = ws2.find(w => w.id === id);
+                    if (e2?.mode) setWorldMode(e2.mode);
+                }).catch(() => {});
+            }
             window.history.replaceState(null, '', `?world=${id}`);
-            const ws = new WebSocket(`ws://${location.host}/api/ws/${id}`);
-            ws.onmessage = (m) => {
-                const data = JSON.parse(m.data);
-                if (data.type === 'system') {
-                    setToasts(t => [...t.slice(-3), { id: Date.now() + Math.random(), text: data.text }]);
-                } else if (data.type === 'stats') {
-                    // private per-socket channel: never clobbered by ticks
-                    setSelectedStats(data.stats);
-                } else if (data.type === 'tick') {
-                    setTick(data);
-                    // accumulate world population for the bottom-bar sparkline
-                    const total = (data.kingdoms ?? []).reduce(
-                        (a, k) => a + (k.population || 0), 0);
-                    const hist = worldPopRef.current;
-                    const last = hist[hist.length - 1];
-                    if (!last || last.month !== data.month) {
-                        hist.push({ month: data.month, pop: Math.round(total) });
-                        if (hist.length > 500) hist.splice(0, hist.length - 500);
+            let reconnectAttempts = 0;
+            const connect = () => {
+                const ws = new WebSocket(`ws://${location.host}/api/ws/${id}`);
+                ws.onopen = () => {
+                    reconnectAttempts = 0;
+                    setWsStatus('connected');
+                    ws.send(JSON.stringify({ speed: 1, pause: true }));
+                };
+                ws.onmessage = (m) => {
+                    const data = JSON.parse(m.data);
+                    if (data.type === 'system') {
+                        addToast(data.text);
+                    } else if (data.type === 'stats') {
+                        setSelectedStats(data.stats);
+                    } else if (data.type === 'tick') {
+                        setTick(data);
+                        const total = (data.kingdoms ?? []).reduce(
+                            (a, k) => a + (k.population || 0), 0);
+                        const hist = worldPopRef.current;
+                        const last = hist[hist.length - 1];
+                        if (!last || last.month !== data.month) {
+                            hist.push({ month: data.month, pop: Math.round(total) });
+                            if (hist.length > 500) hist.splice(0, hist.length - 500);
+                        }
+                        if (data.month % 12 === 0) {
+                            setHistory(h => {
+                                if (h.length && h[h.length-1].month === data.month) return h;
+                                const next = [...h, data];
+                                return next.length > 200 ? next.slice(-200) : next;
+                            });
+                        }
                     }
-                    if (data.month % 12 === 0) {
-                        setHistory(h => {
-                            if (h.length && h[h.length-1].month === data.month) return h;
-                            const next = [...h, data];
-                            return next.length > 200 ? next.slice(-200) : next;
-                        });
+                };
+                ws.onclose = () => {
+                    if (wsRef.current !== ws) return; // superseded by a newer openStream
+                    setWsStatus('disconnected');
+                    if (reconnectAttempts < 5) {
+                        reconnectAttempts += 1;
+                        setWsStatus('reconnecting');
+                        setTimeout(connect, 1000 * Math.pow(2, reconnectAttempts - 1));
                     }
-                }
+                };
+                ws.onerror = () => {
+                    setWsStatus('disconnected');
+                };
+                wsRef.current = ws;
             };
-            ws.onopen = () => ws.send(JSON.stringify({ speed: 1, pause: true }));
-            wsRef.current = ws;
+            connect();
         });
     };
 
@@ -177,12 +200,17 @@ export default function App() {
 
     const createWorld = (params) => {
         setBusy(true);
+        setCreateError(null);
         fetch('/api/worlds', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify(params),
         })
-            .then(r => r.json())
+            .then(async r => {
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+                return d;
+            })
             .then(d => {
                 setBusy(false);
                 setState(d.state);
@@ -190,6 +218,11 @@ export default function App() {
                 setWorldMode(params.mode || 'single');
                 openStream(d.id, params.mode);
                 refreshList();
+            })
+            .catch(err => {
+                setBusy(false);
+                setCreateError(String(err.message || err));
+                addToast(`⚠ ${String(err.message || err)}`);
             });
     };
 
@@ -244,6 +277,8 @@ export default function App() {
 
     const backToMenu = () => {
         if (wsRef.current) wsRef.current.close();
+        worldPopRef.current = [];
+        setWsStatus('disconnected');
         setState(null);
         setTick(null);
         setWorldId(null);
@@ -258,7 +293,7 @@ export default function App() {
     const copyInvite = () => {
         const url = `${location.origin}${location.pathname}?world=${worldId}`;
         navigator.clipboard?.writeText(url).catch(() => {});
-        setToasts(t => [...t.slice(-3), { id: Date.now() + Math.random(), text: `🔗 invite link copied: ${url}` }]);
+        addToast(`🔗 invite link copied: ${url}`);
     };
 
     const doClaim = async (kingdomId) => {
@@ -269,7 +304,7 @@ export default function App() {
             userName = 'Oracle-' + Math.floor(Math.random() * 9000 + 1000);
             const { setIdentityName } = await import('./identity.js');
             setIdentityName(userName);
-            setToasts(t => [...t.slice(-3), { id: Date.now() + Math.random(), text: `claiming as ${userName} — set your name in the room tab` }]);
+            addToast(`claiming as ${userName} — set your name in the room tab`);
         }
         const tok = token || await ensureIdentity();
         const r = await fetch(`/api/worlds/${worldId}/claims`, {
@@ -285,7 +320,7 @@ export default function App() {
             fetch(`/api/worlds/${worldId}/claims`).then(r => r.json()).then(setClaims).catch(() => {});
         } else {
             const err = await r.json().catch(() => ({}));
-            setToasts(t => [...t.slice(-3), { id: Date.now() + Math.random(), text: `⚠ claim failed: ${err.detail || r.status}` }]);
+            addToast(`⚠ claim failed: ${err.detail || r.status}`);
         }
     };
 
@@ -311,6 +346,7 @@ export default function App() {
                     lang={lang}
                     user={user}
                     showMine={showMine}
+                    createError={createError}
                     onToggleMine={() => {
                         const next = !showMine;
                         setShowMine(next);
@@ -348,6 +384,11 @@ export default function App() {
                     {worldMode === 'league' ? '👑 league' : '👁'} · {mapFixed ? 'fijo' : 'libre'} · F · click
                 </span>
                 <span style={{ flex: 1 }} />
+                <span title={wsStatus} style={{
+                    width: 8, height: 8, borderRadius: '50%', display: 'inline-block',
+                    background: wsStatus === 'connected' ? '#3fb950' : wsStatus === 'reconnecting' ? '#d29922' : '#f85149',
+                    flexShrink: 0,
+                }} />
                 <button style={{ ...btn, fontSize: 11, padding: '2px 8px' }} onClick={exportPng} title="download map PNG">📷</button>
                 <LangToggle lang={lang} onChange={setLangAndSave} />
                 <AuthButton user={user} onLogin={() => setShowLogin(true)} onLogout={doLogout} t={(k) => t(lang, k)} />
@@ -363,41 +404,48 @@ export default function App() {
                     lang={lang}
                 />
             )}
-            <div style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative' }}>
-                <WorldMap
-                    state={state}
-                    tick={displayTick || tick}
-                    mapMode={mapMode}
-                    onMapMode={setMapMode}
-                    onSiteClick={(k) => { setSelected(k); setSelectedStats(null); }}
-                    onBackgroundClick={() => { setSelected(null); setSelectedStats(null); }}
-                    stats={stats}
-                    govDesc={govDesc}
-                    onClearSelection={() => { setSelected(null); setSelectedStats(null); }}
-                    claims={claims}
-                    worldMode={worldMode}
-                    onClaim={doClaim}
-                    lang={lang}
-                    canvasRef={mapCanvasRef}
-                    followId={followId}
-                    onFollowClear={() => setFollowId(null)}
-                    warFocus={warFocus}
-                    fixed={mapFixed}
-                    onToggleFixed={() => setMapFixed(v => !v)}
-                />
-                {/* system toasts (prophecy resolutions, chat) */}
-                <div style={{ position: 'absolute', top: 40, right: 360, zIndex: 20, display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 340 }}>
-                    {toasts.map(t => (
-                        <div key={t.id} style={{
-                            background: 'rgba(22,27,34,0.95)',
-                            border: '1px solid #f0c674',
-                            borderRadius: 6,
-                            padding: '6px 10px',
-                            fontSize: 12,
-                            color: '#f0c674',
-                            whiteSpace: 'pre-wrap',
-                        }}>{t.text}</div>
-                    ))}
+            <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+                {/* left column: map (big) + chronicle below */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
+                    <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
+                        <WorldMap
+                            state={state}
+                            tick={displayTick || tick}
+                            mapMode={mapMode}
+                            onMapMode={setMapMode}
+                            onSiteClick={(k) => { setSelected(k); setSelectedStats(null); }}
+                            onBackgroundClick={() => { setSelected(null); setSelectedStats(null); }}
+                            stats={stats}
+                            govDesc={govDesc}
+                            onClearSelection={() => { setSelected(null); setSelectedStats(null); }}
+                            claims={claims}
+                            worldMode={worldMode}
+                            onClaim={doClaim}
+                            lang={lang}
+                            canvasRef={mapCanvasRef}
+                            followId={followId}
+                            onFollowClear={() => setFollowId(null)}
+                            warFocus={warFocus}
+                            fixed={mapFixed}
+                            onToggleFixed={() => setMapFixed(v => !v)}
+                        />
+                        {/* system toasts */}
+                        <div style={{ position: 'absolute', top: 40, right: 12, zIndex: 20, display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 340 }}>
+                            {toasts.map(t => (
+                                <div key={t.id} onClick={() => setToasts(ts => ts.filter(x => x.id !== t.id))} style={{
+                                    background: 'rgba(22,27,34,0.95)',
+                                    border: '1px solid #f0c674',
+                                    borderRadius: 6,
+                                    padding: '6px 10px',
+                                    fontSize: 12,
+                                    color: '#f0c674',
+                                    whiteSpace: 'pre-wrap',
+                                    cursor: 'pointer',
+                                }} title="click to dismiss">{t.text}</div>
+                            ))}
+                        </div>
+                    </div>
+                    <ChroniclePanel events={(displayTick || tick)?.events} lang={lang} tick={displayTick || tick} />
                 </div>
                 <Sidebar
                     tick={displayTick || tick}

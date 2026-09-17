@@ -524,8 +524,8 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
             if (onBackgroundClick) onBackgroundClick();
         }
     };
-    const onWheel = (e) => {
-        if (fixed) { e.preventDefault(); return; }
+    const onWheel = useCallback((e) => {
+        if (fixed) return;
         e.preventDefault();
         const canvas = canvasRef.current;
         const rect = canvas.getBoundingClientRect();
@@ -539,7 +539,15 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
         v.scale = ns;
         clampView(canvas, v);
         draw();
-    };
+    }, [fixed, W, H, draw]);
+
+    // wheel with passive:false (React's onWheel is passive and blocks preventDefault)
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        canvas.addEventListener('wheel', onWheel, { passive: false });
+        return () => canvas.removeEventListener('wheel', onWheel);
+    }, [onWheel]);
 
     return (
         <div style={{ flex: 1, position: 'relative', minWidth: 0, minHeight: 0, height: '100%', overflow: 'hidden' }}>
@@ -572,7 +580,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                 ref={canvasRef}
                 style={{ width: '100%', height: '100%', cursor: fixed ? 'pointer' : 'grab', display: 'block' }}
                 onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
-                onMouseLeave={onUp} onWheel={onWheel}
+                onMouseLeave={onUp}
             />
             {/* floating stats panel for the selected kingdom (always visible) */}
             {stats && (

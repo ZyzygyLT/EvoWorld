@@ -5,7 +5,7 @@ import { t } from '../i18n.js';
  * Fixed bottom strip with live world statistics + population sparkline.
  * Always visible regardless of zoom (it lives outside the canvas).
  */
-export default function WorldBar({ tick, lang = 'es', historyRef }) {
+function WorldBarInner({ tick, lang = 'es', historyRef }) {
     if (!tick) return null;
     const alive = (tick.kingdoms ?? []).filter(k => (k.sites?.length ?? 0) > 0);
     const total = alive.reduce((a, k) => a + (k.population || 0), 0);
@@ -47,6 +47,8 @@ function WorldSpark({ values }) {
         </svg>
     );
 }
+
+export default React.memo(WorldBarInner);
 
 const bar = {
     display: 'flex',

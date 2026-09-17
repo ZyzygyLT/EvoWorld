@@ -26,7 +26,7 @@
 [TYPE]Fanatic Theocracy
 	[DESCRIPTION]A form of government where power resides in the religious elite seeking to expand their religion to other Civilizations.
 	[AGGRESSIVENESS]2
-	[MILITARIZATION]30
+	[MILITARIZATION]40
 	[TECH]-20
 [TYPE]Theocracy
 	[DESCRIPTION]A form of government where power resides in the religious elite looking for higher enlightenment and guidance.

@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 from worldsim.data.loaders import load_governments, load_races
 from worldsim.server.prediction_resolver import resolve_pending
@@ -77,8 +80,6 @@ class WorldRunner:
             self._task = asyncio.create_task(self._run())
 
     async def _run(self) -> None:
-        import traceback
-
         while True:
             await asyncio.sleep(PUSH_INTERVAL)
             if self.paused:
@@ -104,9 +105,9 @@ class WorldRunner:
                 self._check_season_end()
                 self._broadcast_tick()
             except Exception:
-                # NEVER let one bad tick kill the shared clock silently
-                # (this once froze every spectator with zero diagnostics)
-                traceback.print_exc()
+                logger.exception(
+                    "tick failed for world %s at month %s", self.world_id, self.eng.month,
+                )
 
     # -- broadcast ---------------------------------------------------------
 
@@ -177,9 +178,12 @@ class RunnerRegistry:
     def get(self, world_id: int, seed: int, width: int, height: int,
             enabled_races: list[str] | None = None,
             sea_level: float = 0.2) -> WorldRunner:
+        # double-checked with a simple lock-free guard: uvicorn runs single-threaded
+        # event loop, so concurrent coroutines cannot interleave inside this sync method
         if world_id not in self._runners:
             runner = WorldRunner(world_id, seed, width, height, enabled_races, sea_level)
-            self._runners[world_id] = runner
+            # re-check in case a concurrent task inserted between check and assignment
+            self._runners.setdefault(world_id, runner)
         return self._runners[world_id]
 
     def get_existing(self, world_id: int) -> WorldRunner | None:

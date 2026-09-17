@@ -18,7 +18,9 @@ def test_every_event_type_has_templates():
         "war_ended", "battle", "battle_champion", "site_captured", "site_razed",
         "kingdom_collapsed", "rebellion", "tech_era", "government_civilized",
         "golden_age", "plague", "independence", "colony_founded",
-        "government_changed", "milestone_first_city", "milestone_first_battle",
+        "government_changed", "drought", "flood", "famine", "earthquake", "migration",
+        "trade_route", "trade_cut", "faith_temple", "faith_conversion", "holy_war",
+        "milestone_first_city", "milestone_first_battle",
         "milestone_first_hero", "milestone_first_beast_slain",
         "milestone_first_empire", "milestone_ten_thousand", "milestone_century",
     }
@@ -41,6 +43,11 @@ def test_spanish_renders_without_placeholders():
                          "age": 40, "victories": 3}),
         ("rebellion", {"n": 4, "kingdom": "K", "new_kingdom": "N",
                          "title": "Chief", "leader": "L"}),
+        ("trade_route", {"a": "A", "b": "B"}),
+        ("trade_cut", {"a": "A", "b": "B"}),
+        ("faith_temple", {"kingdom": "K", "site": "S", "faith": "Animism"}),
+        ("faith_conversion", {"kingdom": "K", "old": "Animism", "faith": "Polytheism", "src": "X"}),
+        ("holy_war", {"war": "W", "a": "A", "b": "B", "faith_a": "Polytheism", "faith_b": "Skepticism"}),
     ]
     for key, params in cases:
         for lang in ("es", "en"):

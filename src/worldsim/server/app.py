@@ -26,9 +26,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import secrets
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -51,7 +54,7 @@ from worldsim.server.prediction_resolver import (
 )
 from worldsim.server.runner import registry
 from worldsim.sim.engine import SimEngine
-from worldsim.sim.models import EventType
+from worldsim.sim.models import EventType, TRIBAL_GOVERNMENT
 from worldsim.worldgen import WorldConfig
 from worldsim.worldgen.pipeline import generate_world
 
@@ -74,6 +77,7 @@ class CreateWorldRequest(BaseModel):
     mode: str = Field(default="single")  # single | league
     season_years: int = Field(default=300, ge=12, le=2000)
     enabled_races: list[str] | None = Field(default=None)
+    kingdom_races: list[str] | None = Field(default=None, max_length=16)
     sea_level: float = Field(default=0.2, ge=0.05, le=0.5)
 
 
@@ -157,6 +161,7 @@ def _build_engine(
     seed: int, width: int, height: int,
     n_civilized: int = 2, n_tribal: int = 2, n_beasts: int = 2,
     enabled_races: list[str] | None = None,
+    kingdom_races: list[str] | None = None,
     sea_level: float = 0.2,
 ) -> SimEngine:
     cfg = WorldConfig(seed=seed, width=width, height=height, sea_level=sea_level)
@@ -167,6 +172,7 @@ def _build_engine(
         world, races, govs, seed=seed,
         n_civilized=n_civilized, n_tribal=n_tribal, n_beasts=n_beasts,
         enabled_races=enabled_races,
+        kingdom_races=kingdom_races,
     )
 
 
@@ -188,11 +194,11 @@ def get_meta() -> dict:
         ]
         + [
             {
-                "name": "Tribal",
-                "description": "Council of elders; loose authority over kin groups.",
-                "aggressiveness": 2,
-                "militarization": 50,
-                "tech_bonus": 0,
+                "name": TRIBAL_GOVERNMENT.name,
+                "description": TRIBAL_GOVERNMENT.description,
+                "aggressiveness": TRIBAL_GOVERNMENT.aggressiveness,
+                "militarization": TRIBAL_GOVERNMENT.militarization,
+                "tech_bonus": TRIBAL_GOVERNMENT.tech_bonus,
             }
         ],
         "races": [
@@ -254,11 +260,29 @@ def create_world(
     """Generate a world, optionally pre-simulate `months`, persist, return id+state."""
     if req.mode not in ("single", "league"):
         raise HTTPException(400, "mode must be 'single' or 'league'")
+    if req.enabled_races:
+        known = {r.name for r in load_races(DATA_DIR / "Races.txt")}
+        bad = [n for n in req.enabled_races if n not in known]
+        # only reject if SOME names are valid but others aren't; all-nonsense
+        # is the fallback path (engine restores the full set)
+        if bad and len(bad) < len(req.enabled_races):
+            raise HTTPException(400, f"unknown race(s): {', '.join(bad)}")
+    if req.kingdom_races:
+        known = {r.name for r in load_races(DATA_DIR / "Races.txt")}
+        bad = [n for n in req.kingdom_races if n not in known]
+        if bad:
+            raise HTTPException(400, f"unknown kingdom race(s): {', '.join(bad)}")
+        # only civilized/tribal races allowed for kingdoms, not beasts
+        form_map = {r.name: r.form for r in load_races(DATA_DIR / "Races.txt")}
+        bad_form = [n for n in req.kingdom_races if form_map.get(n) == "site"]
+        if bad_form:
+            raise HTTPException(400, f"beast races not allowed for kingdoms: {', '.join(bad_form)}")
     owner = _auth_user(authorization)
     eng = _build_engine(
         req.seed, req.width, req.height,
         req.n_civilized, req.n_tribal, req.n_beasts,
-        req.enabled_races, req.sea_level,
+        req.enabled_races,
+        req.kingdom_races, req.sea_level,
     )
     for _ in range(req.months):
         eng.tick()
@@ -307,11 +331,19 @@ def get_world(world_id: int) -> dict:
 
 
 @app.delete("/api/worlds/{world_id}")
-def delete_world(world_id: int) -> dict:
+def delete_world(
+    world_id: int,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    user = _auth_user(authorization)
     with db.SessionLocal() as db_:  # type: ignore[call-arg]
         row = db_.get(WorldRow, world_id)
         if row is None:
             raise HTTPException(404, f"world {world_id} not found")
+        # auth gate: owner-only; anonymous worlds are open to anyone
+        if row.owner_user_id is not None:
+            if user is None or user.id != row.owner_user_id:
+                raise HTTPException(403, "only the owner may delete this world")
         db_.delete(row)
         db_.commit()
         return {"deleted": world_id}
@@ -497,10 +529,21 @@ def _tick_payload(eng: SimEngine) -> dict:
                 "color": list(k.color),
                 "population_history": [int(p) for p in k.population_history],
                 "tech_level": k.tech_level,
+                "army_size": round(eng.kingdom_stats(k)["army_size"], 1),
                 "military_power": round(eng.kingdom_stats(k)["military_power"], 1),
                 "militarization_pct": k.government.militarization,
                 "techs": sorted(k.techs),
                 "golden_age": k.golden_age_until > eng.month,
+                "drought": k.drought_until > eng.month,
+                "happiness": round(k.happiness, 1),
+                "faith": k.faith,
+                "temples": sorted(k.temples),
+                "trade_routes": [
+                    {"partner_id": pid,
+                     "partner": next((q.name for q in eng.kingdoms if q.id == pid), f"#{pid}"),
+                     "months": k.trader_kindred.get(pid, 0)}
+                    for pid in sorted(k.trade_routes)
+                ],
                 "founded_month": k.founded_month,
             }
             for k in eng.kingdoms
@@ -516,6 +559,13 @@ def _tick_payload(eng: SimEngine) -> dict:
             for b in eng.beasts
         ],
         "fallen": eng.fallen,
+        "trade_routes": [
+            {"a": min(a.name, b.name), "b": max(a.name, b.name),
+             "a_id": min(a.id, b.id), "b_id": max(a.id, b.id),
+             "months": min(a.trader_kindred.get(b.id, 0), b.trader_kindred.get(a.id, 0))}
+            for a in eng.kingdoms for b in eng.kingdoms
+            if b.id in a.trade_routes and a.id < b.id
+        ],
         "battle_heat": {
             "max": float(heat.max()),
             "cells": [
@@ -526,7 +576,7 @@ def _tick_payload(eng: SimEngine) -> dict:
         "events": [
             {"month": e.month, "type": e.type.name, "text": e.text,
              "msg_key": e.msg_key, "params": e.params}
-            for e in eng.chronicle.recent(12)
+            for e in eng.chronicle.recent(40)
         ],
         # full milestone timeline for the Hitos tab (rare by design)
         "milestones": [

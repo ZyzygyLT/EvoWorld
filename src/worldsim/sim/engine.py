@@ -54,7 +54,7 @@ LEADER_REIGN_STD = 10 * 12
 LEADER_REIGN_MIN = 5 * 12
 # heroes
 HERO_EMERGE_CHANCE = 0.02  # per battle won
-HERO_DEATH_CHANCE = 0.08  # per battle fought (win or lose)
+HERO_DEATH_CHANCE = 0.04  # per battle fought (win or lose) — halved for balance
 # beasts
 N_BEASTS = 2
 BEAST_HUNT_POWER = 150  # population-power needed to slay one beast unit
@@ -75,9 +75,60 @@ ERA_INFLUENCE_PER_LEVEL = 2  # ... +2 tiles per era
 TECH_BASE_YEARS_PER_ERA = 90  # legacy constant (see _progress_tech formula)
 TECH_GOLDEN_AGE_YEARS = 25  # golden age duration
 TECH_GOLDEN_AGE_CHANCE = 0.0015  # monthly chance while prosperous
-PLAGUE_MIN_DENSITY_POP = 8000  # plagues only strike dense realms
+PLAGUE_MIN_DENSITY_POP = 2000  # plagues strike earlier (was 8000)
 PLAGUE_CHANCE_MONTHLY = 0.0004
 PLAGUE_MORTALITY = (0.10, 0.30)
+
+# natural disasters (see _maybe_disasters)
+DROUGHT_CHANCE = 0.0006        # monthly per kingdom — withers crops
+DROUGHT_DURATION = (6, 18)     # months
+DROUGHT_MORTALITY = (0.02, 0.06)
+FLOOD_CHANCE = 0.0004          # monthly per riverside kingdom
+FLOOD_MORTALITY = (0.03, 0.08)
+FAMINE_CHANCE = 0.0005         # monthly per kingdom after drought/overcrowding
+FAMINE_MORTALITY = (0.05, 0.15)
+EARTHQUAKE_CHANCE = 0.0002     # monthly per kingdom — rare, devastating
+EARTHQUAKE_MORTALITY = (0.08, 0.25)
+
+# happiness (see _update_happiness)
+GOV_HAPPINESS: dict[str, float] = {
+    "Tribal": 0.0,
+    "Absolute Monarchy": -2.0,
+    "Theocracy": 1.0,
+    "Military Dictatorship": -10.0,
+    "Constitutional monarchy": 6.0,
+    "Plutocracy": 4.0,
+    "Fanatic Theocracy": -6.0,
+    "Democracy": 10.0,
+    "Technocracy": 5.0,
+}
+
+# migration (see _maybe_migration)
+MIGRATION_CHANCE = 0.04        # per 3-month check when conditions met
+MIGRATION_SHARE = (0.02, 0.05)  # % of source pop that moves
+MIGRATION_MIN_POP = 50        # need at least this many to send migrants
+
+# faith & religion (see _update_faith / temples)
+FAITHS = ("Animism", "Polytheism", "Monotheism", "Skepticism")
+_FAITH_POS = {"Animism": 0, "Polytheism": 1, "Monotheism": 2, "Skepticism": 3}
+FAITH_TEMPLE_CHANCE = 0.06    # yearly per-kingdom chance to raise a temple
+FAITH_TEMPLE_HAPPINESS = 3.0  # flat happiness per temple
+FAITH_TEMPLE_GROWTH = 0.02    # +2% growth per temple
+FAITH_CONVERSION_CHANCE = 0.06  # yearly per exposed realm
+FAITH_TENSION_WAR_BONUS = 0.03  # extra war chance when faiths distant (× distance)
+FAITH_TENSION_TRADE_PENALTY = 0.12  # trade form chance penalty per distance
+HOLY_WAR_HERO_CHANCE = 0.35   # zealot heroes rise faster in holy wars
+HOLY_WAR_ARMY_BONUS = 0.08    # attacker zeal multiplier when faiths oppose
+# theological distance (linear chain Animism–Polytheism–Monotheism–Skepticism), capped at 2
+def _faith_distance(a: str, b: str) -> int:
+    return min(2, abs(_FAITH_POS.get(a, 0) - _FAITH_POS.get(b, 0)))
+
+# trade (see _update_trade)
+TRADE_FORM_CHANCE = 0.22      # yearly chance for a qualifying pair to open a route
+TRADE_BONUS_HAPPINESS = 4.0   # flat happiness bonus per active route
+TRADE_BONUS_GROWTH = 0.04     # +4% growth per route
+TRADE_MIN_PROSPER = 0.45      # need avg prosperity above this to trade
+TRADE_MAX_ROUTES = 2          # cap per kingdom (keeps network sparse)
 COLONY_FOUNDED_MIN_SITES = 12  # saturated-ish realms found colonies
 COLONY_DISTANCE = (15, 30)
 COLONY_INDEPENCE_DISTANCE = 45  # colonies this far declare peaceful independence
@@ -128,6 +179,7 @@ class SimEngine:
         n_tribal: int = TRIBAL_CIVS,
         n_beasts: int = N_BEASTS,
         enabled_races: list[str] | None = None,
+        kingdom_races: list[str] | None = None,
     ) -> None:
         self.world = world
         self.races = (
@@ -147,7 +199,7 @@ class SimEngine:
         self.wars: list[War] = []
         self.beasts: list[Beast] = []
         self.relations: dict[tuple[int, int], Relation] = {}
-        self._occupancy = np.zeros(world.height.shape, dtype=np.int16)  # kingdom id +1
+        self._occupancy = np.zeros(world.height.shape, dtype=np.int32)  # kingdom id +1
         self._battle_heat = np.zeros(world.height.shape, dtype=np.float32)
         self._next_war_id = 1
         self._next_leader_id = 1
@@ -158,7 +210,7 @@ class SimEngine:
         self._world_techs: set[str] = set()  # techs discovered by anyone
         self.fallen: list[dict] = []  # memorial of collapsed realms
         self._color_counter = 0  # golden-angle hue assignment
-        self._spawn_kingdoms(n_civilized, n_tribal)
+        self._spawn_kingdoms(n_civilized, n_tribal, kingdom_races)
         self._spawn_beasts(n_beasts)
 
     # -- setup ----------------------------------------------------------------
@@ -186,7 +238,20 @@ class SimEngine:
         ys, xs = np.nonzero(mask)
         return list(zip(xs.tolist(), ys.tolist(), strict=True))
 
-    def _spawn_kingdoms(self, n_civilized: int, n_tribal: int) -> None:
+    def _spawn_kingdoms(
+        self, n_civilized: int, n_tribal: int,
+        kingdom_races: list[str] | None = None,
+    ) -> None:
+        # If the user picked exact races, spawn them directly.
+        if kingdom_races:
+            race_map = {r.name: r for r in self.races}
+            full_map = {r.name: r for r in self.races}
+            # fallback to full list if name not in filtered set
+            for idx, name in enumerate(kingdom_races):
+                race = race_map.get(name) or full_map.get(name)
+                if race:
+                    self._found_kingdom(race, TRIBAL_GOVERNMENT, f"#{idx + 1}")
+            return
         # Stone Age: EVERYONE starts tribal (Chiefdom). Civilized governments
         # unlock through tech eras — no Democracies at year zero.
         # Races are dealt without replacement (shuffled cycle) so neighbors
@@ -213,7 +278,19 @@ class SimEngine:
         free = [(x, y) for x, y in candidates if self._occupancy[y, x] == 0]
         if not free:
             return None
-        x, y = free[int(self.rng.integers(0, len(free)))]
+        # Spread kingdoms apart: prefer tiles far from existing capitals
+        if self.kingdoms and len(free) > 20:
+            existing = [(k.sites[0].x, k.sites[0].y) for k in self.kingdoms if k.sites]
+            scored = []
+            for fx, fy in free:
+                md = min(manhattan(fx, fy, ex, ey) for ex, ey in existing) if existing else 999
+                scored.append((md, fx, fy))
+            scored.sort(key=lambda t: -t[0])
+            # pick from the farther third so there is still variety
+            top = scored[: max(1, len(scored) // 3)]
+            _, x, y = top[int(self.rng.integers(0, len(top)))]
+        else:
+            x, y = free[int(self.rng.integers(0, len(free)))]
         k = Kingdom(
             id=len(self.kingdoms),
             name=self.namegen.kingdom_name(race.form),
@@ -365,7 +442,7 @@ class SimEngine:
     def _process_notables(self) -> None:
         """Age the courts: die ~50y, arrive on milestones (merchant at 800 pop...)."""
         for k in self.kingdoms:
-            if not k.sites:
+            if k.collapsed or not k.sites:
                 continue
             for n in self._living_notables(k):
                 age_months = self.month - n.born_month
@@ -419,7 +496,7 @@ class SimEngine:
                 a, b = self.rng.choice(axes, size=2, replace=False).tolist()
                 shift = float(self.rng.uniform(0.02, 0.06))
                 k.culture[a] = max(0.05, k.culture[a] - shift)
-                k.culture[b] = k.culture[b] + shift
+                k.culture[b] = min(2.0, k.culture[b] + shift)
 
     def _maybe_emerge_hero(self, k: Kingdom) -> None:
         """Battle-hardened kingdoms sometimes produce a champion."""
@@ -430,6 +507,11 @@ class SimEngine:
         chance = HERO_EMERGE_CHANCE * (
             1.0 + (max(n.ambition for n in warlords) if warlords else 0.0)
         )
+        # holy wars quicken zealots
+        if k.at_war:
+            foe = next((w.side_b if w.side_a is k else w.side_a for w in self.wars if not w.is_over and k in (w.side_a, w.side_b)), None)
+            if foe and _faith_distance(k.faith, foe.faith) >= 2:
+                chance *= 1.0 + HOLY_WAR_HERO_CHANCE
         if self.rng.random() < chance and k.at_war:
             hero = Hero(
                 id=self._next_hero_id,
@@ -490,11 +572,16 @@ class SimEngine:
             if target is None:
                 continue
 
-            # hunt or raid, by relative power
             hunt_power = target_k.total_population * target_k.government.militarization / 100
+            # beasts take damage from hunts; chip away until dead
             if beast.aggression == 0 or hunt_power > BEAST_HUNT_POWER:
-                # kingdom slays the beast (maybe)
+                # damage scales with surplus hunt power; even weak hunts chip 1 HP
+                dmg = max(1, int((hunt_power - BEAST_HUNT_POWER * 0.5) / 40))
+                # 15% chance for a decisive finishing blow
                 if self.rng.random() < 0.15:
+                    dmg = beast.hp
+                beast.hp -= dmg
+                if beast.hp <= 0:
                     beast.hp = 0
                     self._ev(
                         EventType.BEAST_SLAIN, "beast_slain",
@@ -503,8 +590,9 @@ class SimEngine:
                         (target_k.id,),
                     )
             elif beast.aggression >= 1:
-                # raid: losses at the nearest site
-                dead = max(1, int(beast.power * self.rng.uniform(0.5, 1.5)))
+                # raid: losses capped to not wipe a site in one hit
+                dead = max(1, int(beast.power * self.rng.uniform(0.5, 1.2)))
+                dead = min(dead, max(1, int(target.population * 0.4)))
                 target.population = max(0, target.population - dead)
                 self._battle_heat[target.y, target.x] += dead
                 self._ev(
@@ -539,20 +627,30 @@ class SimEngine:
         """Advance one month (GDD §2)."""
         self.month += 1
         for k in self.kingdoms:
+            if k.collapsed:
+                continue
             self._resettle(k)
             self._grow_kingdom(k)
             self._succession(k)
+        self._update_happiness()
+        self._maybe_migration()
         self._process_notables()
         self._process_beasts()
         self._update_relations()
+        self._update_trade()
         self._resolve_wars()
         for k in self.kingdoms:
+            if k.collapsed:
+                continue
             self._maybe_shift_government(k)
         self._maybe_rebellion()
         self._tech_and_events()
         self._cleanup_collapsed()
         self._sample_history()
         self._check_milestones()
+        # war declaration can happen inside _update_relations/_resolve_wars,
+        # so cut newly-broken trade routes right after
+        self._cut_wartime_trade()
 
     def _check_milestones(self) -> None:
         """Fire world-historic achievements exactly once (GDD §7 highlights)."""
@@ -631,7 +729,8 @@ class SimEngine:
         repro = k.race.reproduction
         k.total_population = 0
         if not k.at_war and k.war_exhaustion > 0:
-            k.war_exhaustion = max(0, k.war_exhaustion - 1)  # heal in peace
+            # exponential decay ~ halves every ~4 months, clears 30 in ~20 peace months
+            k.war_exhaustion = max(0, int(k.war_exhaustion * 0.85))
         for site in k.sites:
             # slow ancient growth (~2%/month at repro 100 compounded, quartered
             # above half popcap). Population is float: fractional growth
@@ -639,7 +738,7 @@ class SimEngine:
             # small villages forever). Fertile bloodlines grow ~±20% faster.
             fertility = site.traits.get("fertility", 0.5)
             growth = (
-                site.population * repro / 5000
+                site.population * repro / 4000
                 * (0.8 + 0.4 * fertility)
                 * (1 + k.mods.get("growth", 0.0))
             )
@@ -650,8 +749,22 @@ class SimEngine:
                 growth *= 1.0 + 0.3 * max(
                     n.greed for n in self._living_notables(k) if n.role == "merchant"
                 )
+            # drought: crops fail, growth withers
+            if k.drought_until > self.month:
+                growth *= 0.45
+            # happiness: content realms grow, miserable ones stagnate
+            if k.happiness >= 65:
+                growth *= 1.10
+            elif k.happiness < 35:
+                growth *= 0.80 if k.happiness >= 25 else 0.65
+            # active trade routes boost growth (merchants move food & tools)
+            if k.trade_routes:
+                growth *= 1.0 + TRADE_BONUS_GROWTH * len(k.trade_routes)
+            # temples feed and heal
+            if k.temples:
+                growth *= 1.0 + FAITH_TEMPLE_GROWTH * min(4, len(k.temples))
             if site.population > site.popcap / 2:
-                growth /= 4  # overcrowding slows growth
+                growth /= 2.5  # overcrowding slows growth (was /4)
             site.population = site.population + growth
             site.update_category()
 
@@ -666,14 +779,14 @@ class SimEngine:
             if site.population > cap:
                 site.population = cap
                 if len(k.sites) < MAX_SITES:
-                    site.population = cap / 2
-                    self._expand(k, site)
+                    if self._expand(k, site):
+                        site.population = cap / 2
 
             k.total_population += site.population
 
         k.years_since_founding = self.month // 12
 
-    def _expand(self, k: Kingdom, origin: Site) -> None:
+    def _expand(self, k: Kingdom, origin: Site) -> bool:
         candidates = self._suitable_tiles(k.race)
         for _ in range(200):
             x, y = candidates[int(self.rng.integers(0, len(candidates)))]
@@ -696,7 +809,352 @@ class SimEngine:
                  "category": site.category},
                 (k.id,),
             )
+            return True
+        return False
+
+    # -- happiness & migration ------------------------------------------------
+
+    def _update_happiness(self) -> None:
+        """Recompute 0..100 happiness for every living realm (bi-monthly, smooth).
+
+        Factors: government doctrine, war/peace, recent disasters, prosperity,
+        overcrowding and golden ages. Lerps toward target to avoid wild swings.
+        """
+        if self.month % 3 != 0:
             return
+        for k in self.kingdoms:
+            if k.collapsed or not k.sites:
+                continue
+            target = 50.0
+            # government doctrine
+            target += GOV_HAPPINESS.get(k.government.name, 0.0)
+            # war is miserable
+            if k.at_war:
+                ongoing = sum(1 for w in self.wars if not w.is_over and k in (w.side_a, w.side_b))
+                target -= 16 * max(1, ongoing)
+                # war exhaustion makes it worse
+                if k.war_exhaustion > 15:
+                    target -= 6
+            # recent disasters linger
+            months_since_disaster = self.month - k._last_disaster_month
+            if months_since_disaster < 24:
+                target -= (1 - months_since_disaster / 24) * 14
+            months_since_plague = self.month - k._last_plague_month
+            if months_since_plague < 18:
+                target -= (1 - months_since_plague / 18) * 10
+            # drought in progress
+            if k.drought_until > self.month:
+                target -= 8
+            # long peace feels good
+            if not k.at_war and k.war_exhaustion == 0 and self.month > k.founded_month + 12:
+                target += 6
+            # prosperity: fertile lands make people content
+            avg_prosper = sum(self.world.prosperity[s.y, s.x] for s in k.sites) / max(1, len(k.sites))
+            target += (avg_prosper - 0.5) * 14
+            # overcrowding breeds discontent
+            crowded = sum(1 for s in k.sites if s.population > s.popcap * 0.85)
+            if crowded > 0:
+                target -= min(12, crowded * 4)
+            # golden age lifts spirits
+            if k.golden_age_until > self.month:
+                target += 10
+            # trade brings quiet contentment
+            if k.trade_routes:
+                target += TRADE_BONUS_HAPPINESS * len(k.trade_routes)
+            # temples bring spiritual contentment
+            if k.temples:
+                target += FAITH_TEMPLE_HAPPINESS * min(3, len(k.temples))
+            # low population / few sites feels precarious
+            if k.total_population < 80:
+                target -= 8
+            if len(k.sites) == 1 and k.total_population < 40:
+                target -= 6
+            # clamp & lerp (responsive: half-life ~4 months)
+            target = max(0, min(100, target))
+            k.happiness = k.happiness * 0.68 + target * 0.32
+            k.happiness = max(0, min(100, k.happiness))
+
+    def _maybe_migration(self) -> None:
+        """People flee misery for greener pastures.
+
+        Every 3 months, unhappy/war-torn realms lose a small share of
+        population to a nearby happier neighbor. Even peaceful realms
+        exchange people if the prosperity gap is stark.
+        """
+        if self.month % 3 != 0:
+            return
+        living = [k for k in self.kingdoms if not k.collapsed and k.sites]
+        if len(living) < 2:
+            return
+        for src in living:
+            if src.total_population < MIGRATION_MIN_POP:
+                continue
+            # push factors: war is the strongest driver
+            push = 0.0
+            if src.at_war:
+                push += 0.7
+            if src.happiness < 40:
+                push += (40 - src.happiness) / 40 * 0.9
+            if src.drought_until > self.month:
+                push += 0.35
+            # prosperity migration: poor lands bleed people
+            if src.happiness < 42 and not src.at_war:
+                push += 0.15
+            if push < 0.30:
+                continue
+            if self.rng.random() >= MIGRATION_CHANCE * (1 + push):
+                continue
+            # find best nearby destination: happier, within contact range
+            best = None
+            best_score = -1
+            for dst in living:
+                if dst is src or not dst.sites:
+                    continue
+                # at war -> not attractive (unless push is extreme)
+                if dst.at_war and push < 0.8:
+                    continue
+                # must be in contact (same radius as diplomacy)
+                in_contact = any(
+                    manhattan(ss.x, ss.y, ds.x, ds.y) < WAR_DISTANCE
+                    for ss in src.sites for ds in dst.sites
+                )
+                if not in_contact:
+                    continue
+                # need a meaningful happiness gap
+                if dst.happiness <= src.happiness + 3:
+                    continue
+                score = dst.happiness + dst.total_population / 800
+                if dst.golden_age_until > self.month:
+                    score += 8
+                if score > best_score:
+                    best_score, best = score, dst
+            if best is None:
+                continue
+            share = float(self.rng.uniform(*MIGRATION_SHARE))
+            if src.happiness < 25:
+                share *= 1.6
+            moving = max(1, int(src.total_population * share))
+            # donors: take proportionally from all source sites
+            remaining = moving
+            for s in src.sites:
+                if remaining <= 0:
+                    break
+                take = min(s.population * 0.35, remaining * (s.population / max(1, src.total_population)))
+                take = max(0, min(s.population - 1, take))
+                s.population -= take
+                remaining -= take
+            actually_moved = moving - remaining
+            if actually_moved < 1:
+                continue
+            # arrive at the capital of the destination
+            dst_cap = best.ensure_capital()
+            if dst_cap:
+                dst_cap.population += actually_moved
+            src.total_population = sum(s.population for s in src.sites)
+            best.total_population = sum(s.population for s in best.sites)
+            self._ev(
+                EventType.MIGRATION, "migration",
+                {"n": int(actually_moved), "src": src.name, "dst": best.name},
+                (src.id, best.id),
+            )
+
+    # -- trade ----------------------------------------------------------------
+
+    def _update_trade(self) -> None:
+        """Yearly formation of trade routes between peaceful neighbors.
+        Pruning of broken routes (war/collapse) happens immediately via
+        _cut_wartime_trade() each tick.
+        """
+        if self.month % 12 != 0:
+            return
+        living = [k for k in self.kingdoms if not k.collapsed and k.sites]
+        if len(living) < 2:
+            return
+
+        # prune routes whose partner is gone/at war/collapsed (also called from _cut_wartime_trade monthly)
+        for k in living:
+            for partner_id in list(k.trade_routes):
+                partner = next((q for q in self.kingdoms if q.id == partner_id), None)
+                if partner is None or partner.collapsed or not partner.sites or k.at_war or partner.at_war:
+                    k.trade_routes.discard(partner_id)
+                    if partner is not None and partner.trade_routes is not None:
+                        partner.trade_routes.discard(k.id)
+                        partner.trader_kindred.pop(k.id, None)
+                    k.trader_kindred.pop(partner_id, None)
+                    dst_name = partner.name if partner else f"realm {partner_id}"
+                    self._ev(EventType.TRADE_CUT, "trade_cut",
+                             {"a": k.name, "b": dst_name}, (k.id,))
+
+        # try to open new routes (merchants and coastal techs help)
+        # precompute prosperous enough
+        def prosper_ok(k: Kingdom) -> bool:
+            avg = sum(self.world.prosperity[s.y, s.x] for s in k.sites) / max(1, len(k.sites))
+            return avg >= TRADE_MIN_PROSPER
+
+        candidates: list[tuple[Kingdom, Kingdom]] = []
+        for i, a in enumerate(living):
+            if len(a.trade_routes) >= TRADE_MAX_ROUTES:
+                continue
+            for b in living[i + 1:]:
+                if len(b.trade_routes) >= TRADE_MAX_ROUTES:
+                    continue
+                if b.id in a.trade_routes:
+                    continue
+                if a.at_war or b.at_war:
+                    continue
+                rel = self.get_relation(a, b)
+                if rel not in (Relation.ALLIANCE, Relation.PEACE):
+                    continue
+                # contact?
+                contact = any(manhattan(sa.x, sa.y, sb.x, sb.y) < WAR_DISTANCE
+                              for sa in a.sites for sb in b.sites)
+                if not contact:
+                    continue
+                # at least one side should be reasonably prosperous
+                if not (prosper_ok(a) or prosper_ok(b)):
+                    continue
+                candidates.append((a, b))
+
+        for a, b in candidates:
+            if len(a.trade_routes) >= TRADE_MAX_ROUTES or len(b.trade_routes) >= TRADE_MAX_ROUTES:
+                continue
+            if b.id in a.trade_routes:
+                continue
+            # merchants boost the chance; trade-tech helps
+            best_greed = 0.0
+            for k in (a, b):
+                for n in self._living_notables(k, "merchant"):
+                    best_greed = max(best_greed, n.greed)
+            trade_bonus = max(a.mods.get("colony", 0.0), b.mods.get("colony", 0.0))
+            chance = TRADE_FORM_CHANCE * (1 + 0.8 * best_greed + 1.2 * trade_bonus)
+            if a.tech_level >= 1:
+                chance *= 1.4
+            # distant faiths trade less eagerly
+            faith_gap = _faith_distance(a.faith, b.faith)
+            chance *= max(0.35, 1 - faith_gap * FAITH_TENSION_TRADE_PENALTY)
+            if self.rng.random() >= chance:
+                continue
+            a.trade_routes.add(b.id)
+            b.trade_routes.add(a.id)
+            a.trader_kindred[b.id] = 0
+            b.trader_kindred[a.id] = 0
+            self._ev(EventType.TRADE_ROUTE, "trade_route",
+                     {"a": a.name, "b": b.name}, (a.id, b.id))
+
+        # bump tenure for surviving routes
+        for k in living:
+            for pid in list(k.trade_routes):
+                k.trader_kindred[pid] = k.trader_kindred.get(pid, 0) + 1
+
+    # -- faith & temples ----------------------------------------------------
+
+    def _maybe_temple(self, k: Kingdom) -> None:
+        """Yearly: faithful realms may raise a temple on one of their sites."""
+        if self.month % 12 != 0:
+            return
+        if k.collapsed or not k.sites or len(k.temples) >= len(k.sites):
+            return
+        if self.rng.random() >= FAITH_TEMPLE_CHANCE:
+            return
+        # need at least one town/city or capital to justify a temple
+        candidates = [s for s in k.sites if s.name not in k.temples and (s.is_capital or s.category in ("Town", "City"))]
+        if not candidates:
+            candidates = [s for s in k.sites if s.name not in k.temples]
+        if not candidates:
+            return
+        site = candidates[int(self.rng.integers(0, len(candidates)))]
+        k.temples.add(site.name)
+        self._ev(EventType.FAITH_TEMPLE, "faith_temple",
+                 {"kingdom": k.name, "site": site.name, "faith": k.faith}, (k.id,))
+
+    def _maybe_faith_invention(self) -> None:
+        """Yearly: temple-heavy realms may spontaneously reform a new faith."""
+        if self.month % 12 != 0:
+            return
+        if self.month < 10 * 12:
+            return
+        for k in self.kingdoms:
+            if k.collapsed or not k.sites or k.faith != "Animism":
+                continue
+            if len(k.temples) < 1 or len(k.sites) < 3:
+                continue
+            piety = max((n.piety for n in self._living_notables(k, "shaman")), default=0.0)
+            if k.tech_level < 1 and piety < 0.45:
+                continue
+            if self.rng.random() >= 0.022 * (1 + piety + 0.35 * k.tech_level):
+                continue
+            # reform: Polytheism most common, Monotheism rarer, Skepticism later/rarer
+            choices = ["Polytheism"] * 5 + ["Monotheism"] * 3 + (["Skepticism"] if k.tech_level >= 1 else [])
+            new_faith = str(self.rng.choice(choices))
+            old = k.faith
+            k.faith = new_faith
+            self._ev(EventType.FAITH_CONVERSION, "faith_conversion",
+                     {"kingdom": k.name, "old": old, "faith": k.faith, "src": "revelation"},
+                     (k.id,))
+
+    def _maybe_faith_conversion(self) -> None:
+        """Yearly: temples radiate faith; neighbours may convert."""
+        if self.month % 12 != 0:
+            return
+        living = [k for k in self.kingdoms if not k.collapsed and k.sites]
+        if len(living) < 2:
+            return
+        for dst in living:
+            # don't overwrite theocratic founders immediately; small grace
+            if dst.tech_level >= 1 and dst.government.name in ("Theocracy", "Fanatic Theocracy") and len(dst.temples) > 0:
+                continue
+            # find templed neighbours that preach another faith (broader than war contact)
+            sources: list[Kingdom] = []
+            for src in living:
+                if src is dst or not src.temples or src.faith == dst.faith:
+                    continue
+                # faith spreads via pilgrims further than armies look
+                if any(manhattan(sa.x, sa.y, sb.x, sb.y) < WAR_DISTANCE + 18 for sa in src.sites for sb in dst.sites):
+                    sources.append(src)
+            if not sources:
+                continue
+            # weight by number of temples + piety
+            best_src = max(sources, key=lambda s: (len(s.temples), max((n.piety for n in self._living_notables(s, "shaman")), default=0.5)))
+            piety = max((n.piety for n in self._living_notables(dst, "shaman")), default=0.0)
+            chance = FAITH_CONVERSION_CHANCE * (0.7 + 0.75 * min(1.0, len(best_src.temples) / 2))
+            chance *= (1 - 0.35 * piety)
+            # evolved faiths resist regressing to Animism
+            if dst.faith != "Animism" and best_src.faith == "Animism":
+                chance *= 0.45
+            if dst.faith == "Skepticism":
+                chance *= 0.6
+            if self.rng.random() >= chance:
+                continue
+            old = dst.faith
+            dst.faith = best_src.faith
+            self._ev(EventType.FAITH_CONVERSION, "faith_conversion",
+                     {"kingdom": dst.name, "old": old, "faith": dst.faith, "src": best_src.name},
+                     (dst.id, best_src.id))
+
+    def _cut_wartime_trade(self) -> None:
+        """Break active routes touched by any fresh war declaration this tick."""
+        if not any(not w.is_over for w in self.wars):
+            return
+        war_ids = set()
+        for w in self.wars:
+            if w.is_over:
+                continue
+            war_ids.add(w.side_a.id)
+            war_ids.add(w.side_b.id)
+        for k in self.kingdoms:
+            if k.collapsed or not k.trade_routes:
+                continue
+            for pid in list(k.trade_routes):
+                if pid in war_ids or k.id in war_ids:
+                    partner = next((q for q in self.kingdoms if q.id == pid), None)
+                    if partner and (k.at_war or partner.at_war):
+                        k.trade_routes.discard(pid)
+                        if partner:
+                            partner.trade_routes.discard(k.id)
+                            partner.trader_kindred.pop(k.id, None)
+                        k.trader_kindred.pop(pid, None)
+                        self._ev(EventType.TRADE_CUT, "trade_cut",
+                                 {"a": k.name, "b": partner.name if partner else f"realm {pid}"}, (k.id,))
 
     # -- relations & war ------------------------------------------------------
 
@@ -755,7 +1213,10 @@ class SimEngine:
                 expansionist = (
                     len(a.sites) >= MAX_SITES and len(b.sites) >= MAX_SITES
                 )
-                expansionist_chance = EXPANSIONIST_WAR_CHANCE if expansionist else 0.0
+                expansionist_chance = (
+                    EXPANSIONIST_WAR_CHANCE * (1 + 0.5 * max(a.tech_level, b.tech_level))
+                    if expansionist else 0.0
+                )
 
                 roll = self.rng.random()
                 base_war_chance = 0.10 if combined_aggr >= 4 else (
@@ -767,8 +1228,10 @@ class SimEngine:
                     + self._site_trait_avg(b, "aggression")
                     - 1.0
                 ) * 0.05
+                # faith tension: distant creeds fight more
+                faith_tension = _faith_distance(a.faith, b.faith) * FAITH_TENSION_WAR_BONUS
                 war_chance = (
-                    base_war_chance + disparity_bonus + expansionist_chance + blood_bonus
+                    base_war_chance + disparity_bonus + expansionist_chance + blood_bonus + faith_tension
                 )
                 if roll < war_chance:
                     self._declare_war(a, b)
@@ -830,6 +1293,13 @@ class SimEngine:
              "cause_key": cause_key, "site": cause_site},
             (a.id, b.id),
         )
+        if _faith_distance(a.faith, b.faith) >= 2:
+            self._ev(
+                EventType.HOLY_WAR, "holy_war",
+                {"war": war.name, "a": a.name, "b": b.name,
+                 "faith_a": a.faith, "faith_b": b.faith},
+                (a.id, b.id),
+            )
         # cobeligerant allies join the fight (GDD: active alliances)
         for ally in self._allies_of(a):
             if ally is not b and not ally.at_war:
@@ -841,17 +1311,13 @@ class SimEngine:
     def _join_war(self, war: War, joiner: Kingdom, enemy: Kingdom) -> None:
         joiner.at_war = True
         self._set_relation(joiner, enemy, Relation.WAR)
-        # joiner contributes via its own new war against the enemy
-        joined = War(
-            id=self._next_war_id,
-            side_a=joiner,
-            side_b=enemy,
-            start_month=self.month,
-            name=f"The {war.name} (allied front)",
-            cause=f"honoring alliance in {war.name}",
-        )
-        self._next_war_id += 1
-        self.wars.append(joined)
+        # cobelligerent: ally joins the existing war without a separate War
+        # object (avoids double-counting battles/losses for the same conflict)
+        if joiner not in war.cobelligerents_a and joiner not in war.cobelligerents_b:
+            if war.side_a is enemy:
+                war.cobelligerents_a.append(joiner)
+            else:
+                war.cobelligerents_b.append(joiner)
         self._ev(
             EventType.ALLIANCE_JOINED_WAR, "alliance_joined_war",
             {"joiner": joiner.name, "war": war.name, "enemy": enemy.name},
@@ -888,9 +1354,17 @@ class SimEngine:
                 * b.race.strength * era_mult_b * drill_b
             )
             if a.hero:
-                pow_a *= a.hero.strength
+                pow_a *= 1.0 + (a.hero.strength - 1.0) * 0.5
             if b.hero:
-                pow_b *= b.hero.strength
+                pow_b *= 1.0 + (b.hero.strength - 1.0) * 0.5
+            # holy war zeal: distant creeds fight harder
+            faith_gap = _faith_distance(a.faith, b.faith)
+            if faith_gap >= 2:
+                # both sides surge, the slightly more pious one surges harder
+                pa = max((n.piety for n in self._living_notables(a, "shaman")), default=0.0)
+                pb = max((n.piety for n in self._living_notables(b, "shaman")), default=0.0)
+                pow_a *= 1.0 + HOLY_WAR_ARMY_BONUS * (0.7 + 0.6 * pa)
+                pow_b *= 1.0 + HOLY_WAR_ARMY_BONUS * (0.7 + 0.6 * pb)
             a.army_size = pow_a
             b.army_size = pow_b
             total = pow_a + pow_b
@@ -913,6 +1387,21 @@ class SimEngine:
             b.war_exhaustion += 1
             self._maybe_emerge_hero(a)
             self._maybe_emerge_hero(b)
+            # cobelligerents share the burden
+            for cob in list(war.cobelligerents_a) + list(war.cobelligerents_b):
+                if cob.sites:
+                    cob.war_exhaustion += 1
+                    self._maybe_emerge_hero(cob)
+            # war exhaustion forces white peace even before the 60-month cap
+            if not war.is_over and a.war_exhaustion > 30 and b.war_exhaustion > 30 and war_duration > 30:
+                war.end_month = self.month
+                self._ev(
+                    EventType.WAR_ENDED, "war_white_peace",
+                    {"war": war.name, "a": a.name, "b": b.name},
+                    (a.id, b.id),
+                )
+                self._end_war(war)
+                continue
             if war_duration > WAR_DURATION_MAX:
                 # white peace after too long
                 war.end_month = self.month
@@ -933,6 +1422,39 @@ class SimEngine:
             w is not war and not w.is_over and war.side_b in (w.side_a, w.side_b)
             for w in self.wars
         )
+        # diplomacy resets: former enemies can fight again or become allies
+        a_still_war = any(
+            w is not war and not w.is_over and (
+                (war.side_a is w.side_a and war.side_b is w.side_b)
+                or (war.side_a is w.side_b and war.side_b is w.side_a)
+            )
+            for w in self.wars
+        )
+        if not a_still_war:
+            self._set_relation(war.side_a, war.side_b, Relation.PEACE)
+        # cobelligerents: clear their at_war and relations if no other war
+        for coblist, enemy in [(war.cobelligerents_a, war.side_b), (war.cobelligerents_b, war.side_a)]:
+            for cob in coblist:
+                cob.at_war = any(
+                    w is not war and not w.is_over and cob in (w.side_a, w.side_b)
+                    or w is not war and not w.is_over and (
+                        cob in w.cobelligerents_a or cob in w.cobelligerents_b
+                    )
+                    for w in self.wars
+                )
+                still_vs_enemy = any(
+                    w is not war and not w.is_over and (
+                        (cob is w.side_a and enemy is w.side_b)
+                        or (cob is w.side_b and enemy is w.side_a)
+                        or (cob in w.cobelligerents_a and enemy is w.side_b)
+                        or (cob in w.cobelligerents_b and enemy is w.side_a)
+                    )
+                    for w in self.wars
+                )
+                if not still_vs_enemy:
+                    self._set_relation(cob, enemy, Relation.PEACE)
+        war.cobelligerents_a = []
+        war.cobelligerents_b = []
         # war record bookkeeping (drives the W/L stats)
         if war.victor is not None:
             loser = war.side_b if war.victor is war.side_a else war.side_a
@@ -991,15 +1513,25 @@ class SimEngine:
         if len(loser.sites) > 1 and self.rng.random() < 0.35 + winner.mods.get(
             "capture", 0.0
         ):
-            site = loser.sites[int(self.rng.integers(0, len(loser.sites)))]
-            while site.is_capital and len(loser.sites) > 1:
-                site = loser.sites[int(self.rng.integers(0, len(loser.sites)))]
+            # prefer border sites (within WAR_DISTANCE of a winner site)
+            border = [
+                s for s in loser.sites if not s.is_capital
+                and any(manhattan(s.x, s.y, ws.x, ws.y) < WAR_DISTANCE for ws in winner.sites)
+            ]
+            pool = border if border else [s for s in loser.sites if not s.is_capital]
+            if not pool:
+                return
+            site = pool[int(self.rng.integers(0, len(pool)))]
             if not site.is_capital:
                 loser.sites.remove(site)
                 self._occupancy[site.y, site.x] = 0
                 if len(winner.sites) < MAX_SITES:
                     winner.sites.append(site)
                     self._occupancy[site.y, site.x] = winner.id + 1
+                    # temple goes with the land (conqueror inherits the building)
+                    if site.name in loser.temples:
+                        loser.temples.discard(site.name)
+                        winner.temples.add(site.name)
                     self._ev(
                         EventType.SITE_CAPTURED, "site_captured",
                         {"winner": winner.name, "site": site.name,
@@ -1053,10 +1585,17 @@ class SimEngine:
         for k in self.kingdoms:
             if k.total_population > 0:
                 continue
-            already_dead = getattr(k, "_collapsed", False)
-            if already_dead:
+            if k.collapsed:
                 continue
-            k._collapsed = True  # type: ignore[attr-defined]
+            k.collapsed = True
+            # cut all trade routes touching the dead realm
+            for pid in list(k.trade_routes):
+                partner = next((q for q in self.kingdoms if q.id == pid), None)
+                if partner:
+                    partner.trade_routes.discard(k.id)
+                    partner.trader_kindred.pop(k.id, None)
+            k.trade_routes.clear()
+            k.trader_kindred.clear()
             # release its land so the map doesn't fill with ghost claims
             for s in k.sites:
                 if self._occupancy[s.y, s.x] == k.id + 1:
@@ -1099,8 +1638,10 @@ class SimEngine:
             # ambitious warlords plot coups: high ambition adds strain
             warlords = self._living_notables(k, "warlord")
             coup_risk = max([n.ambition for n in warlords] + [0.0])
+            # misery breeds revolt: low happiness is its own strain
             strain = (
                 k.war_exhaustion > 24
+                or k.happiness < 25
                 or (
                     len(k.sites) >= MAX_SITES and k.government.militarization >= 40
                 )
@@ -1108,11 +1649,13 @@ class SimEngine:
             )
             if not strain:
                 continue
-            if self.rng.random() >= REBELLION_CHANCE_MONTHLY * (1.0 + coup_risk):
+            # miserable realms rebel more often
+            happiness_mult = 1.0 if k.happiness >= 35 else 2.5
+            if self.rng.random() >= REBELLION_CHANCE_MONTHLY * (1.0 + coup_risk) * happiness_mult:
                 continue
 
             # the farthest half of sites secedes (distance to capital)
-            cap = k.capital
+            cap = k.ensure_capital()
             if cap is None:
                 continue
             ranked = sorted(
@@ -1140,6 +1683,12 @@ class SimEngine:
                 self._occupancy[s.y, s.x] = new_k.id + 1
             new_k.total_population = sum(s.population for s in new_k.sites)
             k.total_population = sum(s.population for s in k.sites)
+            # faith & temples split with the land
+            new_k.faith = k.faith
+            for s in new_k.sites:
+                if s.name in k.temples:
+                    k.temples.discard(s.name)
+                    new_k.temples.add(s.name)
             # rebels carry the parent's knowledge and culture, drifted
             new_k.techs = set(k.techs)
             new_k.culture = {
@@ -1164,12 +1713,19 @@ class SimEngine:
 
     def _tech_and_events(self) -> None:
         for k in list(self.kingdoms):
-            if not k.sites:
+            if k.collapsed or not k.sites:
                 continue
             self._progress_tech(k)
             self._maybe_golden_age(k)
             self._maybe_plague(k)
+            self._maybe_drought(k)
+            self._maybe_flood(k)
+            self._maybe_famine(k)
+            self._maybe_earthquake(k)
+            self._maybe_temple(k)
             self._maybe_colony(k)
+        self._maybe_faith_invention()
+        self._maybe_faith_conversion()
 
     def _refresh_mods(self, k: Kingdom) -> None:
         """Aggregate tech effects + derive era level from acquired techs."""
@@ -1212,7 +1768,7 @@ class SimEngine:
         prosper = sum(self.world.prosperity[s.y, s.x] for s in k.sites) / max(
             1, len(k.sites)
         )
-        yearly = (0.008 + 0.008 * prosper + max(0, k.government.tech_bonus) * 0.0004)
+        yearly = (0.008 + 0.008 * prosper + k.government.tech_bonus * 0.0004)
         yearly *= 1 + 0.12 * k.tech_level + k.mods.get("tech", 0.0)
         shamans = self._living_notables(k, "shaman")
         if shamans:
@@ -1282,10 +1838,11 @@ class SimEngine:
                     (k.id,),
                 )
         elif not avail and k.tech_progress >= 1.0:
-            # tree exhausted: slow continuous urban growth (~+1%/year)
+            # tree exhausted: continuous urban growth (~+2%/year, scaled by era)
             k.tech_progress = 0.0
+            era_scale = 1.0 + 0.15 * k.tech_level
             for s in k.sites:
-                s.popcap = math.floor(s.popcap * 1.01)
+                s.popcap = math.floor(s.popcap * (1 + 0.02 * era_scale))
 
     def _era_popcap_mult(self, k: Kingdom) -> float:
         # primitive agriculture sustains less (Stone x0.7); each era adds 25%;
@@ -1330,9 +1887,109 @@ class SimEngine:
         self._apply_population_loss(k, dead)
         for s in k.sites:
             self._battle_heat[s.y, s.x] += s.population * rate * 0.5
+        k._last_plague_month = self.month
         self._ev(
             EventType.PLAGUE, "plague",
             {"kingdom": k.name, "dead": dead},
+            (k.id,),
+        )
+
+    # -- natural disasters ---------------------------------------------------
+
+    def _maybe_drought(self, k: Kingdom) -> None:
+        """A prolonged dry spell: crops fail, growth halved for months."""
+        if k.drought_until > self.month:
+            return  # already in drought
+        if k.total_population < 80:
+            return  # too small to notice
+        if self.rng.random() >= DROUGHT_CHANCE:
+            return
+        duration = int(self.rng.integers(*DROUGHT_DURATION))
+        k.drought_until = self.month + duration
+        # immediate toll: a fraction die from thirst/hunger
+        rate = float(self.rng.uniform(*DROUGHT_MORTALITY))
+        dead = max(1, int(k.total_population * rate))
+        self._apply_population_loss(k, dead)
+        for s in k.sites:
+            self._battle_heat[s.y, s.x] += s.population * rate * 0.3
+        k._last_disaster_month = self.month
+        self._ev(
+            EventType.DROUGHT, "drought",
+            {"kingdom": k.name, "dead": dead, "months": duration},
+            (k.id,),
+        )
+
+    def _maybe_flood(self, k: Kingdom) -> None:
+        """River settlements are swept away."""
+        if self.rng.random() >= FLOOD_CHANCE:
+            return
+        riverside = [s for s in k.sites if self.world.rivers[s.y, s.x]]
+        if not riverside:
+            return
+        site = riverside[int(self.rng.integers(0, len(riverside)))]
+        rate = float(self.rng.uniform(*FLOOD_MORTALITY))
+        dead = max(1, int(site.population * rate))
+        site.population = max(1, site.population - dead)
+        k.total_population = sum(s.population for s in k.sites)
+        self._battle_heat[site.y, site.x] += dead
+        k._last_disaster_month = self.month
+        self._ev(
+            EventType.FLOOD, "flood",
+            {"kingdom": k.name, "site": site.name, "dead": dead},
+            (k.id,),
+        )
+
+    def _maybe_famine(self, k: Kingdom) -> None:
+        """Follows drought or extreme overcrowding: mass starvation."""
+        in_drought = k.drought_until > self.month
+        overcrowded = any(s.population > s.popcap * 0.85 for s in k.sites)
+        if not (in_drought or overcrowded):
+            return
+        if k.total_population < 100:
+            return
+        if self.rng.random() >= FAMINE_CHANCE * (2.0 if in_drought else 1.0):
+            return
+        rate = float(self.rng.uniform(*FAMINE_MORTALITY))
+        dead = max(1, int(k.total_population * rate))
+        self._apply_population_loss(k, dead)
+        for s in k.sites:
+            self._battle_heat[s.y, s.x] += s.population * rate * 0.3
+        k._last_disaster_month = self.month
+        self._ev(
+            EventType.FAMINE, "famine",
+            {"kingdom": k.name, "dead": dead},
+            (k.id,),
+        )
+
+    def _maybe_earthquake(self, k: Kingdom) -> None:
+        """Rare: the ground shakes, devastating 1-3 nearby settlements."""
+        if self.rng.random() >= EARTHQUAKE_CHANCE:
+            return
+        if len(k.sites) < 1:
+            return
+        epicenter = k.sites[int(self.rng.integers(0, len(k.sites)))]
+        # affect sites within 4 tiles of epicenter (including itself)
+        affected = [s for s in k.sites if manhattan(s.x, s.y, epicenter.x, epicenter.y) <= 4]
+        if not affected:
+            affected = [epicenter]
+        total_dead = 0
+        for site in affected:
+            rate = float(self.rng.uniform(*EARTHQUAKE_MORTALITY))
+            # epicenter hit hardest
+            if site is epicenter:
+                rate = min(0.35, rate * 1.4)
+            dead = max(1, int(site.population * rate))
+            dead = min(dead, max(1, int(site.population * 0.9)))
+            site.population = max(0, site.population - dead)
+            total_dead += dead
+            self._battle_heat[site.y, site.x] += dead
+        k.total_population = sum(s.population for s in k.sites)
+        epicenter_name = epicenter.name
+        k._last_disaster_month = self.month
+        self._ev(
+            EventType.EARTHQUAKE, "earthquake",
+            {"kingdom": k.name, "site": epicenter_name, "dead": total_dead,
+             "n": len(affected)},
             (k.id,),
         )
 
@@ -1347,7 +2004,7 @@ class SimEngine:
         greed_boost = 1.0 + (max(n.greed for n in merchants) if merchants else 0.0)
         if self.rng.random() >= 0.25 * greed_boost * (1 + k.mods.get("colony", 0.0)):
             return
-        cap = k.capital
+        cap = k.ensure_capital()
         if cap is None:
             return
         candidates = self._suitable_tiles(k.race)
@@ -1382,6 +2039,7 @@ class SimEngine:
                 )
                 self._color_counter += 1
                 new_k.tech_level = max(0, k.tech_level - 1)
+                new_k.faith = k.faith
                 # settlers carry a subset of the parent's knowledge + culture
                 new_k.techs = {
                     tid for tid in k.techs
@@ -1527,6 +2185,24 @@ class SimEngine:
         k.government = new_gov
         k.war_exhaustion = 0
         k.last_gov_shift_month = self.month
+        # theocratic governments anchor the realm's faith
+        if new_gov.name == "Theocracy":
+            if k.faith not in ("Polytheism", "Monotheism"):
+                k.faith = str(self.rng.choice(["Polytheism", "Monotheism"]))
+        elif new_gov.name == "Fanatic Theocracy":
+            if k.faith != "Monotheism":
+                old_faith = k.faith
+                k.faith = "Monotheism"
+                self._ev(EventType.FAITH_CONVERSION, "faith_conversion",
+                         {"kingdom": k.name, "old": old_faith, "faith": k.faith, "src": "fanatic zeal"},
+                         (k.id,))
+        elif new_gov.name == "Technocracy" and self.rng.random() < 0.45:
+            if k.faith != "Skepticism":
+                old_faith = k.faith
+                k.faith = "Skepticism"
+                self._ev(EventType.FAITH_CONVERSION, "faith_conversion",
+                         {"kingdom": k.name, "old": old_faith, "faith": k.faith, "src": "enlightenment"},
+                         (k.id,))
         self._ev(
             EventType.GOVERNMENT_CHANGED, "government_changed",
             {"kingdom": k.name, "old": old,
@@ -1539,12 +2215,10 @@ class SimEngine:
     def kingdom_stats(self, k: Kingdom) -> dict:
         """Rich per-kingdom statistics for the UI inspector panel."""
         era_mult = (1.0 + ERA_ARMY_BONUS * k.tech_level) * (1 + k.mods.get("army", 0.0))
-        military = (
-            k.total_population * k.government.militarization / 100
-            * k.race.strength * era_mult
-        )
+        army_size = k.total_population * k.government.militarization / 100
+        military = army_size * k.race.strength * era_mult
         if k.hero:
-            military *= k.hero.strength
+            military *= 1.0 + (k.hero.strength - 1.0) * 0.5
         territory = int((self.territory_map() == k.id).sum())
         influence = int((self.influence_map() == k.id).sum())
 
@@ -1582,13 +2256,32 @@ class SimEngine:
             "sites": len(k.sites),
             "territory_tiles": territory,
             "influence_tiles": influence,
+            "army_size": round(army_size, 1),
             "military_power": round(military, 1),
             "militarization_pct": k.government.militarization,
+            "sites_list": [
+                {"name": s.name, "x": s.x, "y": s.y, "category": s.category,
+                 "population": s.population, "is_capital": s.is_capital}
+                for s in k.sites
+            ],
             "wars_won": k.wars_won,
             "wars_lost": k.wars_lost,
             "wars_total": len(wars_fought),
             "ongoing_wars": sum(1 for w in wars_fought if not w.is_over),
             "golden_age": k.golden_age_until > self.month,
+            "drought": k.drought_until > self.month,
+            "happiness": round(k.happiness, 1),
+            "faith": k.faith,
+            "temples": sorted(k.temples),
+            "trade_routes": [
+                {
+                    "partner": next((q.name for q in self.kingdoms if q.id == pid), f"#{pid}"),
+                    "partner_id": pid,
+                    "months": k.trader_kindred.get(pid, 0),
+                    "color": list(next((q.color for q in self.kingdoms if q.id == pid), (180, 180, 180))),
+                }
+                for pid in sorted(k.trade_routes)
+            ],
             "civilized": k.civilized,
             "leader": (
                 {
@@ -1617,7 +2310,12 @@ class SimEngine:
 
     def territory_map(self) -> np.ndarray:
         """(H, W) kingdom id (-1 none) for political overlay."""
-        return self._occupancy - 1
+        if hasattr(self, "_terr_cache_month") and self._terr_cache_month == self.month and hasattr(self, "_terr_cache"):
+            return self._terr_cache
+        out = self._occupancy - 1
+        self._terr_cache = out
+        self._terr_cache_month = self.month
+        return out
 
     def influence_map(self) -> np.ndarray:
         """(H, W) kingdom id per land tile, claimed by the NEAREST site.

@@ -6,9 +6,9 @@ from worldsim.sim.models import SocialForm
 
 
 def test_load_races(races):
-    assert len(races) == 6
+    assert len(races) == 8
     names = {r.name for r in races}
-    assert names == {"Dwarf", "Human", "Elf", "Orc", "Goblin", "Giant"}
+    assert names == {"Dwarf", "Human", "Elf", "Orc", "Goblin", "Giant", "Wyrm", "Warg Pack"}
 
     dwarf = next(r for r in races if r.name == "Dwarf")
     assert dwarf.preferred_biomes == (9,)

@@ -71,32 +71,32 @@ TECHS: dict[str, dict] = {
     # --- trade / sea --------------------------------------------------------
     "fishing": {
         "branch": "trade", "era": 0, "cost": 0.6, "requires": [],
-        "effects": {"growth": 0.05},
+        "effects": {"growth": 0.08, "popcap": 0.05},
     },
     "coastal_trade": {
         "branch": "trade", "era": 1, "cost": 0.8, "requires": ["fishing"],
-        "effects": {"colony": 0.10},
+        "effects": {"colony": 0.10, "growth": 0.05},
     },
     "currency": {
         "branch": "trade", "era": 2, "cost": 1.0, "requires": ["coastal_trade"],
-        "effects": {"growth": 0.10},
+        "effects": {"growth": 0.10, "popcap": 0.05},
     },
     "merchant_fleet": {
         "branch": "trade", "era": 3, "cost": 1.2, "requires": ["currency"],
-        "effects": {"colony": 0.15},
+        "effects": {"colony": 0.15, "growth": 0.05},
     },
     "cartography": {
         "branch": "trade", "era": 4, "cost": 1.4, "requires": ["merchant_fleet"],
-        "effects": {"influence": 2.0},
+        "effects": {"influence": 2.0, "popcap": 0.05},
     },
     # --- lore / governance ---------------------------------------------------
     "oral_tradition": {
         "branch": "lore", "era": 0, "cost": 0.6, "requires": [],
-        "effects": {"tech": 0.10},
+        "effects": {"tech": 0.08},
     },
     "writing": {
         "branch": "lore", "era": 1, "cost": 0.8, "requires": ["oral_tradition"],
-        "effects": {"tech": 0.15},
+        "effects": {"tech": 0.12},
     },
     "priesthood": {
         "branch": "lore", "era": 2, "cost": 1.0, "requires": ["writing"],
@@ -104,7 +104,7 @@ TECHS: dict[str, dict] = {
     },
     "philosophy": {
         "branch": "lore", "era": 3, "cost": 1.2, "requires": ["priesthood"],
-        "effects": {"tech": 0.20},
+        "effects": {"tech": 0.15},
     },
     "engineering": {
         "branch": "lore", "era": 4, "cost": 1.4,
@@ -118,11 +118,11 @@ TECHS: dict[str, dict] = {
     },
     "banking": {
         "branch": "trade", "era": 5, "cost": 1.6, "requires": ["cartography"],
-        "effects": {"colony": 0.10, "growth": 0.10},
+        "effects": {"colony": 0.10, "growth": 0.10, "popcap": 0.05},
     },
     "printing": {
         "branch": "lore", "era": 5, "cost": 1.6, "requires": ["engineering"],
-        "effects": {"tech": 0.25},
+        "effects": {"tech": 0.20},
     },
     "renaissance_arts": {
         "branch": "craft", "era": 5, "cost": 1.6, "requires": ["architecture"],
@@ -139,7 +139,7 @@ TECHS: dict[str, dict] = {
     },
     "encyclopedia": {
         "branch": "lore", "era": 6, "cost": 1.8, "requires": ["printing"],
-        "effects": {"tech": 0.30, "plague": -0.10},
+        "effects": {"tech": 0.25, "plague": -0.10},
     },
 }
 

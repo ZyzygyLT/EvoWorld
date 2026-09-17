@@ -70,6 +70,11 @@ def engine_to_dict(engine: SimEngine) -> dict:
                 "techs": sorted(k.techs),
                 "culture": {axis: round(w, 3) for axis, w in k.culture.items()},
                 "golden_age": k.golden_age_until > engine.month,
+                "drought": k.drought_until > engine.month,
+                "happiness": round(k.happiness, 1),
+                "faith": k.faith,
+                "temples": sorted(k.temples),
+                "trade_routes": sorted(k.trade_routes),
                 "founded_month": k.founded_month,
                 "territory": (engine.territory_map() == k.id).astype(int).tolist(),
             }

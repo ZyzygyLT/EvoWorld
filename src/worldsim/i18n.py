@@ -17,7 +17,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "leader_crowned": "{leader} becomes {title} of {kingdom}.",
         "merchant_rose": "{name} the merchant rose to prominence in {kingdom}.",
         "warlord_rose": "{name} the warlord took command of {kingdom}'s hosts.",
-        "leader_died": "{title} {leader} of {kingdom} died at age {age} after"
+        "leader_died": "{title} {leader} of {kingdom} died at age {age} after "
             "{victories} victories.",
         "hero_emerged": "The champion {hero} rises in {kingdom} (battle strength x{strength}).",
         "hero_fell": "The champion {hero} of {kingdom} fell in battle after {deeds} deeds.",
@@ -56,6 +56,16 @@ STRINGS: dict[str, dict[str, str]] = {
         "milestone_ten_thousand": "★ {kingdom} became the first realm to reach 10,000 souls.",
         "milestone_century": "★ A full century of recorded history has passed.",
         "tech_discovery": "★ {kingdom} discovered {tech} before all others.",
+        "drought": "A harsh drought struck {kingdom} — {dead} perished and crops will fail for {months} months.",
+        "flood": "A great flood swept through {site} in {kingdom} — {dead} souls were lost.",
+        "famine": "Famine gripped {kingdom} — {dead} starved as food ran out.",
+        "earthquake": "A terrible earthquake shook {site} in {kingdom} — {dead} dead across {n} settlements.",
+        "migration": "{n} souls fled {src} for {dst}, seeking peace and prosperity.",
+        "trade_route": "{a} and {b} opened a trade route — caravans now cross their lands.",
+        "trade_cut": "Trade between {a} and {b} was cut — war and hardship closed the road.",
+        "faith_temple": "{kingdom} raised a temple to {faith} at {site}.",
+        "faith_conversion": "{kingdom} abandoned {old} and embraced {faith} under the influence of {src}.",
+        "holy_war": "✠ A holy war! {war}: {a} ({faith_a}) clashes with {b} ({faith_b}) for the true faith!",
     },
     "es": {
         "kingdom_founded": "{kingdom} ({race}, {government}) fundó su capital {site}.",
@@ -63,7 +73,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "leader_crowned": "{leader} se convierte en {title} de {kingdom}.",
         "merchant_rose": "El mercader {name} ganó prominencia en {kingdom}.",
         "warlord_rose": "{name} el caudillo tomó el mando de las huestes de {kingdom}.",
-        "leader_died": "{title} {leader} de {kingdom} murió a los {age} años tras"
+        "leader_died": "{title} {leader} de {kingdom} murió a los {age} años tras "
             "{victories} victorias.",
         "hero_emerged": "El campeón {hero} se alza en {kingdom} (fuerza de batalla x{strength}).",
         "hero_fell": "El campeón {hero} de {kingdom} cayó en batalla tras {deeds} hazañas.",
@@ -78,19 +88,19 @@ STRINGS: dict[str, dict[str, str]] = {
         "war_won": "{victor} ganó {war} ({dead} muertos en {months} meses).",
         "war_ended": "{war} terminó.",
         "battle": "{winner} derrotó a {loser} en batalla ({dead} muertos).",
-        "battle_champion": "¡{winner} derrotó a {loser} en batalla ({dead} muertos) — el"
+        "battle_champion": "¡{winner} derrotó a {loser} en batalla ({dead} muertos) — el "
             "campeón {champion} lideró la carga!",
         "site_captured": "{winner} capturó {site} de {loser}.",
         "site_razed": "{winner} arrasó {site} — {loser} perdió el asentamiento.",
         "kingdom_collapsed": "{kingdom} ha colapsado y ya no existe.",
-        "rebellion": "¡{n} asentamientos de {kingdom} se rebelaron y fundaron"
+        "rebellion": "¡{n} asentamientos de {kingdom} se rebelaron y fundaron "
             "{new_kingdom} bajo {title} {leader}!",
         "tech_era": "{kingdom} entró en {era}.",
-        "government_civilized": "{kingdom} dejó atrás las viejas costumbres de {old} y formó"
+        "government_civilized": "{kingdom} dejó atrás las viejas costumbres de {old} y formó "
             "{government} al amanecer {era}.",
         "golden_age": "Una edad dorada amanece sobre {kingdom} — sus ciudades florecen.",
         "plague": "Una terrible plaga arrasó {kingdom} — {dead} almas perecieron.",
-        "independence": "¡La lejana colonia {site} declaró su independencia de"
+        "independence": "¡La lejana colonia {site} declaró su independencia de "
             "{kingdom}, fundando {new_kingdom}!",
         "colony_founded": "{kingdom} fundó la colonia {site} en tierras distantes.",
         "government_changed": "{kingdom} cambió de {old} a {government} {reason}.",
@@ -98,17 +108,31 @@ STRINGS: dict[str, dict[str, str]] = {
         "milestone_first_battle": "★ Se libró la primera batalla de la historia.",
         "milestone_first_hero": "★ El primer campeón de la historia, {hero}, camina la tierra.",
         "milestone_first_beast_slain": "★ Un monstruo fue asesinado por primera vez.",
-        "milestone_first_empire": "★ {kingdom} se convirtió en el primer reino con {n}"
+        "milestone_first_empire": "★ {kingdom} se convirtió en el primer reino con {n} "
             "asentamientos.",
         "milestone_ten_thousand": "★ {kingdom} fue el primer reino en alcanzar 10.000 almas.",
         "milestone_century": "★ Ha pasado un siglo completo de historia registrada.",
         "tech_discovery": "★ {kingdom} descubrió {tech} antes que nadie.",
+        "drought": "Una dura sequía azotó {kingdom} — {dead} perecieron y las cosechas fallarán por {months} meses.",
+        "flood": "Una gran inundación arrasó {site} en {kingdom} — {dead} almas perdidas.",
+        "famine": "El hambre atenazó {kingdom} — {dead} murieron de inanición.",
+        "earthquake": "Un terrible terremoto sacudió {site} en {kingdom} — {dead} muertos en {n} asentamientos.",
+        "migration": "{n} almas huyeron de {src} hacia {dst} en busca de paz y prosperidad.",
+        "trade_route": "{a} y {b} abrieron una ruta comercial — las caravanas ya cruzan sus tierras.",
+        "trade_cut": "El comercio entre {a} y {b} se cortó — la guerra y las penurias cerraron el camino.",
+        "faith_temple": "{kingdom} alzó un templo a {faith} en {site}.",
+        "faith_conversion": "{kingdom} abandonó {old} y abrazó {faith} bajo la influencia de {src}.",
+        "holy_war": "¡✠ Guerra santa! {war}: {a} ({faith_a}) choca con {b} ({faith_b}) por la fe verdadera.",
     },
 }
 
 # fixed-vocabulary translations (governments, races, eras, biomes, titles)
 VOCAB: dict[str, dict[str, str]] = {
     "es": {
+        "Animism": "Animismo",
+        "Polytheism": "Politeísmo",
+        "Monotheism": "Monoteísmo",
+        "Skepticism": "Escepticismo",
         "Tribal": "Tribal",
         "Absolute Monarchy": "Monarquía Absoluta",
         "Constitutional monarchy": "Monarquía Constitucional",
@@ -167,7 +191,7 @@ def render(lang: str, key: str, params: dict | None = None) -> str:
     params = dict(params or {})
     # fixed-vocabulary slots are translated too (proper names pass through)
     if lang != "en":
-        for slot in ("government", "gov", "race", "era", "title", "category", "old"):
+        for slot in ("government", "gov", "race", "era", "title", "category", "old", "faith", "old_faith", "faith_a", "faith_b"):
             if slot in params and isinstance(params[slot], str):
                 params[slot] = vocab(lang, params[slot])
     table = STRINGS.get(lang, STRINGS["en"])

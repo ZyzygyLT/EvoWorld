@@ -47,7 +47,7 @@ TRIBAL_GOVERNMENT = GovernmentType(
     name="Tribal",
     description="Council of elders; loose authority over kin groups.",
     aggressiveness=2,
-    militarization=50,
+    militarization=35,
     tech_bonus=0,
 )
 
@@ -72,6 +72,8 @@ class Site:
             self.category = "City"
         elif self.population >= 120:
             self.category = "Town"
+        else:
+            self.category = "Village"
 
 
 # -- Leaders & heroes ------------------------------------------------------------
@@ -134,8 +136,8 @@ class Hero:
 
     @classmethod
     def roll_strength(cls, rng) -> float:
-        # heroes are rare and variable: 1.5x .. 3x army multiplier
-        return float(1.5 + rng.random() * 1.5)
+        # heroes are rare and variable: 1.2x .. 2x army multiplier (nerfed from 1.5-3x)
+        return float(1.2 + rng.random() * 0.8)
 
 
 # -- Kingdoms & wars ---------------------------------------------------------------
@@ -149,7 +151,7 @@ class Kingdom:
     government: GovernmentType
     color: tuple[int, int, int]
     sites: list[Site] = field(default_factory=list)
-    total_population: int = 0
+    total_population: float = 0
     at_war: bool = False
     army_size: float = 0.0
     army_pos: tuple[int, int] | None = None
@@ -168,19 +170,44 @@ class Kingdom:
     culture: dict[str, float] = field(default_factory=dict)  # evolvable weights
     civilized: bool = False  # tribes civilize upon reaching the Iron Age
     golden_age_until: int = -1  # month until which popcap is boosted
+    drought_until: int = -1  # month until which drought suppresses growth
+    happiness: float = 50.0  # 0..100 — affects growth & rebellions
+    faith: str = "Animism"  # one of FAITHS (see sim/engine.py); drifts via temples
+    temples: set[str] = field(default_factory=set)  # site names with a temple
+    trade_routes: set[int] = field(default_factory=set)  # kingdom ids with active routes
+    trader_kindred: dict[int, int] = field(default_factory=dict)  # partner_id -> months trading
+    _last_disaster_month: int = -9999  # for happiness decay
+    _last_plague_month: int = -9999
     wars_won: int = 0
     wars_lost: int = 0
+    collapsed: bool = False  # set once, when total_population hits 0
 
     @property
     def aggression(self) -> int:
         return self.race.aggressiveness + self.government.aggressiveness
 
-    @property
-    def capital(self) -> Site | None:
+    def ensure_capital(self) -> Site | None:
+        """Return the capital, promoting the most populous site if none exists.
+
+        Callers that need a reference point for distances should call this
+        explicitly — the old ``capital`` property mutated state on read.
+        """
         for s in self.sites:
             if s.is_capital:
                 return s
-        return self.sites[0] if self.sites else None
+        if self.sites:
+            best = max(self.sites, key=lambda s: s.population)
+            best.is_capital = True
+            return best
+        return None
+
+    @property
+    def capital(self) -> Site | None:  # noqa: D401
+        """Legacy read-only capital lookup (no mutation)."""
+        for s in self.sites:
+            if s.is_capital:
+                return s
+        return None
 
 
 class Relation(IntEnum):
@@ -203,6 +230,8 @@ class War:
     battles: int = 0
     total_dead: int = 0
     battle_sites: list[tuple[int, int]] = field(default_factory=list)
+    cobelligerents_a: list[Kingdom] = field(default_factory=list)  # allies of side_a
+    cobelligerents_b: list[Kingdom] = field(default_factory=list)  # allies of side_b
 
     @property
     def is_over(self) -> bool:
@@ -260,6 +289,16 @@ class EventType(IntEnum):
     INDEPENDENCE = auto()
     GOLDEN_AGE = auto()
     PLAGUE = auto()
+    DROUGHT = auto()
+    FLOOD = auto()
+    FAMINE = auto()
+    EARTHQUAKE = auto()
+    MIGRATION = auto()
+    TRADE_ROUTE = auto()
+    TRADE_CUT = auto()
+    FAITH_TEMPLE = auto()
+    FAITH_CONVERSION = auto()
+    HOLY_WAR = auto()
 
 
 @dataclass(frozen=True)
@@ -293,6 +332,7 @@ class Chronicle:
     """Append-only historical log (GDD §7)."""
 
     events: list[Event] = field(default_factory=list)
+    _by_kingdom: dict[int, list[Event]] = field(default_factory=dict, repr=False)
 
     def log(
         self,
@@ -305,12 +345,18 @@ class Chronicle:
     ) -> Event:
         e = Event.make(month, type_, text, kingdom_ids, params, msg_key)
         self.events.append(e)
+        for kid in kingdom_ids:
+            self._by_kingdom.setdefault(kid, []).append(e)
         return e
 
     def recent(self, n: int = 50) -> list[Event]:
         return self.events[-n:]
 
     def of_kingdom(self, kingdom_id: int) -> list[Event]:
+        # indexed path (covers all events logged through this instance)
+        if kingdom_id in self._by_kingdom:
+            return list(self._by_kingdom[kingdom_id])
+        # fallback: linear scan for deserialized chronicles (no index rebuild)
         return [e for e in self.events if kingdom_id in e.kingdom_ids]
 
 

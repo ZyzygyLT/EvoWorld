@@ -43,7 +43,7 @@ def load_races(path: str | Path) -> list[Race]:
             Race(
                 name=rec["NAME"],
                 preferred_biomes=biomes,
-                strength=int(rec.get("STRENGHT", 1)),
+                strength=int(rec.get("STRENGTH", rec.get("STRENGHT", 1))),
                 size=int(rec.get("SIZE", 1)),
                 reproduction=int(rec.get("REPRODUCTION", 100)),
                 aggressiveness=int(rec.get("AGGRESSIVENESS", 1)),
