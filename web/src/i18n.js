@@ -132,6 +132,12 @@ export const VOCAB = {    en: {},
         "Village": "Aldea",
         "Town": "Pueblo",
         "City": "Ciudad",
+        "city": "Ciudad",
+        "battle": "Batalla",
+        "war": "Guerra",
+        "reign": "Reinado",
+        "empire": "Imperio",
+        "realm": "Reino",
     },
 };
 

@@ -154,7 +154,7 @@ export default function Sidebar({ tick, meta, paused, speed, onSpeed, onPause, s
                                 style={{ ...btn, fontSize: 10, padding: '1px 6px', background: rankFilter === k ? '#2f81f7' : btn.background }}>{label}</button>
                         ))}
                     </div>
-                    <div style={{ maxHeight: 340, overflowY: 'auto', paddingRight: 2 }}>
+                    <div style={{ maxHeight: 175, overflowY: 'auto', paddingRight: 2 }}>
                         {sortedKingdoms.map((k, idx) => {
                             const leaguePts = standings?.find(s => s.kingdom_id === k.id)?.points;
                             const sc = scoreLabel(k, tick.month, lang);
@@ -334,7 +334,7 @@ function PointsLine({ k, tickMonth, lang, sc }) {
 
 function HitosPanel({ tick, lang }) {
     const [open, setOpen] = React.useState(true);
-    const records = React.useMemo(() => computeRecords(tick), [tick]);
+    const records = React.useMemo(() => computeRecords(tick, lang), [tick, lang]);
     if (!records.length) return null;
     return (
         <>
@@ -344,7 +344,7 @@ function HitosPanel({ tick, lang }) {
                 </button>
             </div>
             {open && (
-                <div style={{ maxHeight: 300, overflowY: 'auto', marginTop: 4, border: '1px solid #21262d', borderRadius: 4, padding: '6px 8px', background: '#161b22' }}>
+                <div style={{ marginTop: 4, border: '1px solid #21262d', borderRadius: 4, padding: '6px 8px', background: '#161b22' }}>
                     {records.map((r, i) => (
                         <div key={i} style={{ fontSize: 11, marginBottom: 2 }}>
                             <span style={{ color: '#d2a8ff' }}>{r.icon} {r.label}:</span>{' '}{r.value}
@@ -356,23 +356,23 @@ function HitosPanel({ tick, lang }) {
     );
 }
 
-function computeRecords(tick) {
+function computeRecords(tick, lang) {
     const out = [];
     if (!tick?.kingdoms?.length) return out;
     let city = null;
     for (const k of tick.kingdoms) for (const s of k.sites ?? []) if (!city || s.population > city.pop) city = { name: s.name, pop: s.population, k: k.name };
-    if (city) out.push({ icon: '🏙', label: 'city', value: `${city.name} (${city.k}) — ${Math.floor(city.pop).toLocaleString()}` });
+    if (city) out.push({ icon: '🏙', label: vocab(lang, 'city'), value: `${city.name} (${city.k}) — ${Math.floor(city.pop).toLocaleString()}` });
     const cells = tick.battle_heat?.cells ?? [];
-    if (cells.length) { const top = cells.reduce((a, b) => (b.v > a.v ? b : a), cells[0]); out.push({ icon: '🩸', label: 'battle', value: `(${top.x},${top.y}) — ${Math.floor(top.v).toLocaleString()} dead` }); }
+    if (cells.length) { const top = cells.reduce((a, b) => (b.v > a.v ? b : a), cells[0]); out.push({ icon: '🩸', label: vocab(lang, 'battle'), value: `(${top.x},${top.y}) — ${Math.floor(top.v).toLocaleString()} dead` }); }
     const wars = [...(tick.wars_recent ?? []), ...(tick.wars_ongoing ?? []).map(w => ({ ...w, battles: w.battles }))];
-    if (wars.length) { const top = wars.reduce((a, b) => ((b.battles ?? 0) > (a.battles ?? 0) ? b : a), wars[0]); out.push({ icon: '⚔', label: 'war', value: `${top.name} — ${top.battles ?? 0} battles` }); }
+    if (wars.length) { const top = wars.reduce((a, b) => ((b.battles ?? 0) > (a.battles ?? 0) ? b : a), wars[0]); out.push({ icon: '⚔', label: vocab(lang, 'war'), value: `${top.name} — ${top.battles ?? 0} battles` }); }
     let reign = null;
     for (const k of tick.kingdoms) if (k.leader && (!reign || k.leader.reign_years > reign.years)) reign = { name: `${k.leader.title} ${k.leader.name}`, years: k.leader.reign_years, k: k.name };
-    if (reign) out.push({ icon: '👑', label: 'reign', value: `${reign.name} (${reign.k}) — ${reign.years}y` });
+    if (reign) out.push({ icon: '👑', label: vocab(lang, 'reign'), value: `${reign.name} (${reign.k}) — ${reign.years}y` });
     const empire = tick.kingdoms.reduce((a, b) => ((b.sites?.length ?? 0) > (a.sites?.length ?? 0) ? b : a));
-    if (empire) out.push({ icon: '🗺', label: 'empire', value: `${empire.name} — ${empire.sites?.length ?? 0} sites` });
+    if (empire) out.push({ icon: '🗿', label: vocab(lang, 'empire'), value: `${empire.name} — ${empire.sites?.length ?? 0} sites` });
     const aged = tick.kingdoms.filter(k => k.founded_month !== undefined);
-    if (aged.length) { const oldest = aged.reduce((a, b) => (a.founded_month < b.founded_month ? a : b)); const y = Math.floor((tick.month - oldest.founded_month) / 12); out.push({ icon: '🏛', label: 'realm', value: `${oldest.name} — ${y}y old` }); }
+    if (aged.length) { const oldest = aged.reduce((a, b) => (a.founded_month < b.founded_month ? a : b)); const y = Math.floor((tick.month - oldest.founded_month) / 12); out.push({ icon: '🏛', label: vocab(lang, 'realm'), value: `${oldest.name} — ${y}y old` }); }
     return out;
 }
 
