@@ -40,6 +40,7 @@ class WorldRow(Base):
     checkpoint_count = Column(Integer, nullable=False, default=0, server_default="0")
     checkpoint_version = Column(Integer, nullable=True)
     visibility = Column(String(7), nullable=False, default="private", server_default="private")
+    next_operation_sequence = Column(Integer, nullable=False, default=1, server_default="1")
     deleted_at = Column(DateTime, nullable=True)  # NULL: mundo activo; timestamp: eliminado lógicamente
 
     __table_args__ = (CheckConstraint("visibility IN ('private', 'public')", name="ck_worlds_visibility"),)
