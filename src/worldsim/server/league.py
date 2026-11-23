@@ -76,8 +76,14 @@ def claim_kingdom(
 ) -> dict | str:
     """Claim a free kingdom (one per user per world). Returns payload or error."""
     with _session() as db:
+        # F7-E.2 (B3-4): ordinary read excludes logically deleted worlds —
+        # claiming on a deleted world is indistinguishable from a missing
+        # one ("world not found").
         row = db.scalars(
-            select(WorldRow).where(WorldRow.id == world_id)
+            select(WorldRow).where(
+                WorldRow.id == world_id,
+                WorldRow.deleted_at.is_(None),
+            )
         ).first()
         if row is None:
             return "world not found"
@@ -121,8 +127,13 @@ def claim_kingdom(
             "points": 0,
         }
         # attach the claimed kingdom's name for toasts
+        # F7-E.2 (B3-4): ordinary read excludes logically deleted worlds
+        # (no deleted world can ever supply toast metadata).
         kingdoms = db.scalars(
-            select(WorldRow).where(WorldRow.id == world_id)
+            select(WorldRow).where(
+                WorldRow.id == world_id,
+                WorldRow.deleted_at.is_(None),
+            )
         ).first()
         if kingdoms is not None:
             try:
@@ -271,7 +282,15 @@ def _toast_text(user: str, delta: int, text: str) -> str:
 def maybe_end_season(world_id: int, eng) -> str | None:
     """At season_years, freeze the world and declare a champion."""
     with _session() as db:
-        row = db.scalars(select(WorldRow).where(WorldRow.id == world_id)).first()
+        # F7-E.2 (B3-4): ordinary read excludes logically deleted worlds —
+        # a deleted world is never frozen nor written (no season transition
+        # on a deleted row; falls through like a missing world).
+        row = db.scalars(
+            select(WorldRow).where(
+                WorldRow.id == world_id,
+                WorldRow.deleted_at.is_(None),
+            )
+        ).first()
         if row is None or row.mode != "league" or row.season_over:
             return None
         limit_month = row.season_years * 12

@@ -320,19 +320,29 @@ class Event:
         kingdom_ids: tuple[int, ...] = (),
         params: dict | None = None,
         msg_key: str = "",
+        event_id: int | None = None,
     ) -> Event:
+        # event_id permite que Chronicle asigne IDs independientes por instancia.
+        # Cuando no se proporciona, se usa el contador global de módulo (retrocompatibilidad).
         return cls(
-            id=next(_EVENT_ID), month=month, type=type_, text=text,
+            id=event_id if event_id is not None else next(_EVENT_ID),
+            month=month, type=type_, text=text,
             kingdom_ids=kingdom_ids, params=params or {}, msg_key=msg_key,
         )
 
 
 @dataclass
 class Chronicle:
-    """Append-only historical log (GDD §7)."""
+    """Append-only historical log (GDD §7).
+
+    Cada instancia administra su propio contador de IDs de eventos
+    (_next_event_id) para que restaurar un mundo no altere los contadores
+    de otros motores en el mismo proceso.
+    """
 
     events: list[Event] = field(default_factory=list)
     _by_kingdom: dict[int, list[Event]] = field(default_factory=dict, repr=False)
+    _next_event_id: int = 1
 
     def log(
         self,
@@ -343,7 +353,11 @@ class Chronicle:
         params: dict | None = None,
         msg_key: str = "",
     ) -> Event:
-        e = Event.make(month, type_, text, kingdom_ids, params, msg_key)
+        e = Event.make(
+            month, type_, text, kingdom_ids, params, msg_key,
+            event_id=self._next_event_id,
+        )
+        self._next_event_id += 1
         self.events.append(e)
         for kid in kingdom_ids:
             self._by_kingdom.setdefault(kid, []).append(e)

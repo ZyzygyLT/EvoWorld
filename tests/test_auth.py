@@ -66,23 +66,36 @@ def test_world_ownership_and_mine_filter(tmp_path):
     c = _fresh(tmp_path)
     reg = c.post("/api/auth/register", json={"username": "ada", "password": "qubit42"})
     tok = reg.json()["token"]
+    hdr = {"Authorization": f"Bearer {tok}"}
 
     r = c.post("/api/worlds", json={"seed": 1, "width": 80, "height": 50},
-               headers={"Authorization": f"Bearer {tok}"})
+               headers=hdr)
     assert r.status_code == 200
     owned = r.json()["id"]
-    r = c.post("/api/worlds", json={"seed": 2, "width": 80, "height": 50})
-    assert r.status_code == 200
-    anon = r.json()["id"]
 
-    mine = c.get("/api/worlds?mine=1", headers={"Authorization": f"Bearer {tok}"}).json()
+    # DEC20: anonymous creation is rejected with 401
+    r = c.post("/api/worlds", json={"seed": 2, "width": 80, "height": 50})
+    assert r.status_code == 401
+
+    # a second account creates its own world (the plain list only serves
+    # PUBLIC worlds, so both must be published to be listed)
+    reg2 = c.post("/api/auth/register", json={"username": "bob", "password": "qubit43"})
+    hdr2 = {"Authorization": f"Bearer {reg2.json()['token']}"}
+    other = c.post("/api/worlds", json={"seed": 2, "width": 80, "height": 50},
+                   headers=hdr2).json()["id"]
+    for wid, h in ((owned, hdr), (other, hdr2)):
+        r = c.put(f"/api/worlds/{wid}/visibility",
+                  json={"visibility": "public"}, headers=h)
+        assert r.status_code == 200, r.text
+
+    mine = c.get("/api/worlds?mine=1", headers=hdr).json()["worlds"]
     assert [w["id"] for w in mine] == [owned]
     assert all(w["mine"] for w in mine)
 
     # anonymous ?mine=1 is rejected
     assert c.get("/api/worlds?mine=1").status_code == 401
-    # full list still shows both
-    assert {w["id"] for w in c.get("/api/worlds").json()} == {owned, anon}
+    # full list still shows both (both are public)
+    assert {w["id"] for w in c.get("/api/worlds").json()["worlds"]} == {owned, other}
 
 
 def test_claim_links_account(tmp_path):

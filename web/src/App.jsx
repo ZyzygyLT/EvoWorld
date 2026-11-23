@@ -38,13 +38,20 @@ export default function App() {
     const [lang, setLang] = useState(() => localStorage.getItem('worldsim_lang') || DEFAULT_LANG);
     const [user, setUser] = useState(null);  // {username, user_id} when logged in
     const [showLogin, setShowLogin] = useState(false);
-    const [showMine, setShowMine] = useState(false);
     const [showTutorial, setShowTutorial] = useState(
         () => !localStorage.getItem('worldsim_tutorial_done'));
     const [createError, setCreateError] = useState(null);
     const [wsStatus, setWsStatus] = useState('disconnected'); // connected|disconnected|reconnecting
     const wsRef = useRef(null);
     const mapCanvasRef = useRef(null);
+    // Galería pública: estado de paginación, búsqueda, filtro y carga
+    const [galleryMode, setGalleryMode] = useState('public'); // 'public' | 'mine'
+    const [galleryCursor, setGalleryCursor] = useState(null);
+    const [gallerySearch, setGallerySearch] = useState('');
+    const [galleryModeFilter, setGalleryModeFilter] = useState(null);
+    const [galleryLoading, setGalleryLoading] = useState(false);
+    const [galleryError, setGalleryError] = useState(null);
+    const [hasNextPage, setHasNextPage] = useState(false);
     const addToast = React.useCallback((text) => {
         setToasts(t => [...t.slice(-3), { id: Date.now() + Math.random(), text }]);
     }, []);
@@ -73,9 +80,62 @@ export default function App() {
     };
 
     const refreshList = () => {
-        const q = showMine && user ? '?mine=1' : '';
-        fetch('/api/worlds' + q, { headers: authHeaders() })
-            .then(r => r.json()).then(setWorlds).catch(() => {});
+        setGalleryLoading(true);
+        setGalleryError(null);
+        const q = new URLSearchParams();
+        if (galleryMode === 'mine') {
+            if (!user) {
+                setGalleryLoading(false);
+                return;
+            }
+            q.set('mine', '1');
+        }
+        q.set('limit', '20');
+        if (gallerySearch) q.set('search', gallerySearch);
+        if (galleryModeFilter) q.set('mode', galleryModeFilter);
+        if (galleryCursor) q.set('cursor', galleryCursor);
+        fetch('/api/worlds?' + q.toString(), { headers: authHeaders() })
+            .then(r => {
+                if (!r.ok) throw new Error('Failed to load worlds');
+                return r.json();
+            })
+            .then(page => {
+                setWorlds(page.worlds);
+                setHasNextPage(page.next_cursor !== null);
+            })
+            .catch(e => {
+                setGalleryError(e.message);
+                setWorlds([]);
+            })
+            .finally(() => setGalleryLoading(false));
+    };
+
+    const loadNextPage = () => {
+        if (!hasNextPage || galleryLoading) return;
+        setGalleryLoading(true);
+        const q = new URLSearchParams();
+        if (galleryMode === 'mine') {
+            q.set('mine', '1');
+        }
+        q.set('limit', '20');
+        if (gallerySearch) q.set('search', gallerySearch);
+        if (galleryModeFilter) q.set('mode', galleryModeFilter);
+        q.set('cursor', galleryCursor);
+        fetch('/api/worlds?' + q.toString(), { headers: authHeaders() })
+            .then(r => r.json())
+            .then(page => {
+                setWorlds(prev => [...prev, ...page.worlds]);
+                setGalleryCursor(page.next_cursor);
+                setHasNextPage(page.next_cursor !== null);
+            })
+            .catch(() => {})
+            .finally(() => setGalleryLoading(false));
+    };
+
+    const resetPagination = () => {
+        setGalleryCursor(null);
+        setHasNextPage(false);
+        refreshList();
     };
     useEffect(() => {
         refreshList();
@@ -99,8 +159,8 @@ export default function App() {
     useEffect(() => {
         if (!worldId) return;
         const load = () => {
-            fetch(`/api/worlds/${worldId}/claims`).then(r => r.json()).then(setClaims).catch(() => {});
-            fetch(`/api/worlds/${worldId}/standings`).then(r => r.json()).then(setStandings).catch(() => {});
+            fetch(`/api/worlds/${worldId}/claims`, { headers: authHeaders() }).then(r => r.json()).then(setClaims).catch(() => {});
+            fetch(`/api/worlds/${worldId}/standings`, { headers: authHeaders() }).then(r => r.json()).then(setStandings).catch(() => {});
         };
         load();
         const iv = setInterval(load, 4000);
@@ -113,12 +173,12 @@ export default function App() {
         setWsStatus('disconnected');
         // refresh the world list first: mode must come from fresh data,
         // otherwise deep-linked league worlds render as single-player
-        fetch('/api/worlds').then(r => r.json()).then(ws => {
-            setWorlds(ws);
-            const entry = ws.find(w => w.id === id);
+        fetch('/api/worlds', { headers: authHeaders() }).then(r => r.json()).then(page => {
+            setWorlds(page.worlds);
+            const entry = page.worlds.find(w => w.id === id);
             setWorldMode(modeHint || entry?.mode || 'single');
         });
-        fetch(`/api/worlds/${id}`).then(r => r.json()).then(s => {
+        fetch(`/api/worlds/${id}`, { headers: authHeaders() }).then(r => r.json()).then(s => {
             setState(s);
             setWorldId(id);
             setPaused(true);   // every opened world starts paused
@@ -130,15 +190,21 @@ export default function App() {
             // world mode already set from fresh fetch above; just ensure fallback
             if (!modeHint) {
                 // use the fresh list if available (first fetch may not have returned yet)
-                fetch('/api/worlds').then(r => r.json()).then(ws2 => {
-                    const e2 = ws2.find(w => w.id === id);
+                fetch('/api/worlds', { headers: authHeaders() }).then(r => r.json()).then(page => {
+                    const e2 = page.worlds.find(w => w.id === id);
                     if (e2?.mode) setWorldMode(e2.mode);
                 }).catch(() => {});
             }
             window.history.replaceState(null, '', `?world=${id}`);
             let reconnectAttempts = 0;
             const connect = () => {
-                const ws = new WebSocket(`ws://${location.host}/api/ws/${id}`);
+                // DEC20: the WS handshake carries the session token (query
+                // param — browsers can't set headers on WebSocket opens).
+                const wsTok = localStorage.getItem('worldsim_token');
+                const ws = new WebSocket(
+                    `ws://${location.host}/api/ws/${id}` +
+                    (wsTok ? `?token=${encodeURIComponent(wsTok)}` : '')
+                );
                 ws.onopen = () => {
                     reconnectAttempts = 0;
                     setWsStatus('connected');
@@ -309,7 +375,7 @@ export default function App() {
         const tok = token || await ensureIdentity();
         const r = await fetch(`/api/worlds/${worldId}/claims`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify({
                 kingdom_id: kingdomId,
                 user_token: tok,
@@ -317,7 +383,7 @@ export default function App() {
             }),
         });
         if (r.ok) {
-            fetch(`/api/worlds/${worldId}/claims`).then(r => r.json()).then(setClaims).catch(() => {});
+            fetch(`/api/worlds/${worldId}/claims`, { headers: authHeaders() }).then(r => r.json()).then(setClaims).catch(() => {});
         } else {
             const err = await r.json().catch(() => ({}));
             addToast(`⚠ claim failed: ${err.detail || r.status}`);
@@ -345,18 +411,39 @@ export default function App() {
                     onOpen={openStream}
                     lang={lang}
                     user={user}
-                    showMine={showMine}
-                    createError={createError}
+                    galleryMode={galleryMode}
+                    gallerySearch={gallerySearch}
+                    galleryModeFilter={galleryModeFilter}
+                    galleryLoading={galleryLoading}
+                    galleryError={galleryError}
+                    hasNextPage={hasNextPage}
                     onToggleMine={() => {
-                        const next = !showMine;
-                        setShowMine(next);
-                        const h = next && user
-                            ? { 'Authorization': `Bearer ${localStorage.getItem('worldsim_token')}` }
-                            : {};
-                        const q = next && user ? '?mine=1' : '';
-                        fetch('/api/worlds' + q, { headers: h })
-                            .then(r => r.json()).then(setWorlds).catch(() => {});
+                        const next = galleryMode === 'public' ? 'mine' : 'public';
+                        setGalleryMode(next);
+                        setGalleryCursor(null);
+                        setHasNextPage(false);
+                        if (next === 'mine' && !user) {
+                            setGalleryError('Log in to see your worlds');
+                            return;
+                        }
+                        setGalleryError(null);
+                        refreshList();
                     }}
+                    onSearchChange={(v) => {
+                        setGallerySearch(v);
+                        setGalleryCursor(null);
+                        setHasNextPage(false);
+                        refreshList();
+                    }}
+                    onModeFilterChange={(v) => {
+                        setGalleryModeFilter(v);
+                        setGalleryCursor(null);
+                        setHasNextPage(false);
+                        refreshList();
+                    }}
+                    onLoadMore={loadNextPage}
+                    onRetry={resetPagination}
+                    createError={createError}
                 />
                 {showLogin && (
                     <AuthModal

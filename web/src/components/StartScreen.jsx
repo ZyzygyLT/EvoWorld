@@ -5,7 +5,7 @@ import { t, vocab } from '../i18n.js';
  * Start screen: mode, seed/size, scenarios, per-kingdom manual race picker, beasts, era head start.
  * kingdom_races (when manual) is sent verbatim to the backend.
  */
-export default function StartScreen({ worlds, meta, busy, onCreate, onOpen, lang = 'es', user = null, showMine = false, onToggleMine, createError }) {
+export default function StartScreen({ worlds, meta, busy, onCreate, onOpen, lang = 'es', user = null, galleryMode = 'public', gallerySearch = '', galleryModeFilter = null, galleryLoading = false, galleryError = null, hasNextPage = false, onToggleMine, onSearchChange, onModeFilterChange, onLoadMore, onRetry, createError }) {
     const [mode, setMode] = React.useState('single');
     const [seed, setSeed] = React.useState(() => String(Math.floor(Math.random() * 99999)));
     const [size, setSize] = React.useState('medium');
@@ -233,25 +233,68 @@ export default function StartScreen({ worlds, meta, busy, onCreate, onOpen, lang
             </button>
             {createError && <div style={{ color: '#f85149', fontSize: 12, marginTop: 8 }}>{createError}</div>}
 
-            {worlds.length > 0 && (
-                <div style={{ marginTop: 22, width: '100%', maxWidth: 640 }}>
-                    <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <span>{lang === 'es' ? 'mundos guardados' : 'saved worlds'}</span>
-                        {user && (
-                            <button style={{ ...btn, fontSize: 11, background: showMine ? '#2f81f7' : btn.background }} onClick={onToggleMine}>
-                                {L('myWorlds')}
+            {/* Galería pública / Mis mundos */}
+            <div style={{ marginTop: 22, width: '100%', maxWidth: 640 }}>
+                <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span>{galleryMode === 'mine' ? (lang === 'es' ? 'mis mundos' : 'my worlds') : (lang === 'es' ? 'galería pública' : 'public gallery')}</span>
+                    {user && (
+                        <button style={{ ...btn, fontSize: 11, background: galleryMode === 'mine' ? '#2f81f7' : btn.background }} onClick={onToggleMine}>
+                            {galleryMode === 'mine' ? (lang === 'es' ? 'galería pública' : 'public gallery') : (lang === 'es' ? 'mis mundos' : 'my worlds')}
+                        </button>
+                    )}
+                </div>
+
+                {galleryError && (
+                    <div style={{ color: '#f85149', fontSize: 11, marginBottom: 8 }}>
+                        {galleryError} <button style={{ ...btn, fontSize: 10, marginLeft: 6 }} onClick={onRetry}>{lang === 'es' ? 'reintentar' : 'retry'}</button>
+                    </div>
+                )}
+
+                {/* search + mode filter */}
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <input
+                        style={{ ...input, width: 200 }}
+                        placeholder={lang === 'es' ? 'buscar por nombre…' : 'search by name…'}
+                        value={gallerySearch}
+                        onChange={e => onSearchChange(e.target.value)}
+                    />
+                    <select style={{ ...input }} value={galleryModeFilter || ''} onChange={e => onModeFilterChange(e.target.value || null)}>
+                        <option value="">{lang === 'es' ? 'todos los modos' : 'all modes'}</option>
+                        <option value="single">{lang === 'es' ? 'un jugador' : 'single player'}</option>
+                        <option value="league">{lang === 'es' ? 'liga' : 'league'}</option>
+                    </select>
+                    {galleryLoading && <span style={{ fontSize: 10, color: '#8b949e' }}>cargando…</span>}
+                </div>
+
+                {worlds.length > 0 ? (
+                    <>
+                        {worlds.map(w => (
+                            <button key={w.id} style={{ ...btn, fontSize: 12, margin: '0 6px 6px 0' }}
+                                onClick={() => onOpen(w.id)}
+                                title={`seed ${w.seed} · ${w.months_simulated}mo`}>
+                                {w.mode === 'league' ? '👑 ' : ''}{w.name} · y{Math.floor(w.months_simulated / 12)}
+                            </button>
+                        ))}
+                        {hasNextPage && (
+                            <button style={{ ...btn, fontSize: 11, marginTop: 8, display: 'block', margin: '8px auto 0' }}
+                                onClick={onLoadMore}
+                                disabled={galleryLoading}>
+                                {lang === 'es' ? 'cargar más' : 'load more'}
                             </button>
                         )}
+                    </>
+                ) : (
+                    <div style={{ fontSize: 11, color: '#8b949e', fontStyle: 'italic', marginTop: 10 }}>
+                        {galleryError
+                            ? (lang === 'es' ? 'error al cargar mundos' : 'error loading worlds')
+                            : galleryLoading
+                                ? (lang === 'es' ? 'cargando mundos…' : 'loading worlds…')
+                                : galleryMode === 'mine'
+                                    ? (lang === 'es' ? 'no tienes mundos guardados' : 'you have no saved worlds')
+                                    : (lang === 'es' ? 'no hay mundos públicos' : 'no public worlds')}
                     </div>
-                    {worlds.map(w => (
-                        <button key={w.id} style={{ ...btn, fontSize: 12, margin: '0 6px 6px 0' }}
-                            onClick={() => onOpen(w.id)}
-                            title={`seed ${w.seed} · ${w.months_simulated}mo`}>
-                            {w.mode === 'league' ? '👑 ' : ''}{w.name} · y{Math.floor(w.months_simulated / 12)}
-                        </button>
-                    ))}
-                </div>
-            )}
+                )}
+            </div>
         </div>
     );
 }

@@ -1,11 +1,15 @@
-"""Database models for the worldsim server (worlds, predictions, chat)."""
+"""Database models for the worldsim server (worlds, predictions, chat).
+
+.. autofunction:: ensure_schema
+.. autofunction:: _ensure_challenge_participants_constraints
+"""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
-from sqlalchemy import Column, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
@@ -31,6 +35,7 @@ class WorldRow(Base):
     enabled_races_json = Column(String, default="")  # JSON list, "" = all
     owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     sea_level = Column(Float, default=0.2)  # ocean threshold used at generation
+    deleted_at = Column(DateTime, nullable=True)  # NULL: mundo activo; timestamp: eliminado lógicamente
 
 
 class ClaimRow(Base):
@@ -79,7 +84,7 @@ class ChatRow(Base):
 class UserRow(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True)
     username = Column(String, unique=True, index=True)
     pw_hash = Column(String)  # pbkdf2-sha256(salt, password), hex
     created_at = Column(String)
@@ -91,6 +96,114 @@ class SessionRow(Base):
     token = Column(String, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), index=True)
     created_at = Column(String)
+
+
+# Challenge row types (CONTRACTS §17, DEC-F7D)
+# These are re-exported from worldsim.server.db so tests can import them
+
+
+class ChallengeRow(Base):
+    __tablename__ = "challenges"
+
+    id = Column(Integer, primary_key=True)
+    organizer_user_id = Column(Integer, nullable=False)
+    name = Column(String, nullable=False)
+    config_json = Column(Text, nullable=False)
+    rules_version = Column(String, nullable=False)
+    duration_ticks = Column(Integer, nullable=False)
+    state = Column(String, default="draft")
+    created_at = Column(String, nullable=False)
+    client_idempotency_key = Column(String, nullable=False)
+    request_hash = Column(String, nullable=False)
+
+
+class ChallengeParticipantRow(Base):
+    __tablename__ = "challenge_participants"
+
+    id = Column(Integer, primary_key=True)
+    challenge_id = Column(Integer, nullable=False)
+    user_id = Column(Integer, nullable=False)
+    world_id = Column(Integer, nullable=False)
+    public_alias = Column(String, nullable=False)
+    result_json = Column(Text, nullable=False)
+    result_status = Column(String, default="persisted")
+    result_verified = Column(Integer, default=0)
+    state = Column(String, default="activo")
+
+
+class ChallengeOperationRow(Base):
+    __tablename__ = "challenge_operations"
+
+    id = Column(Integer, primary_key=True)
+    challenge_id = Column(Integer, nullable=False)
+    operation_id = Column(String, nullable=False)
+    status = Column(String, nullable=False)
+    continuity_state = Column(String, nullable=False)
+    created_at = Column(String, nullable=False)
+    requesting_user_id = Column(Integer, nullable=False)
+    client_idempotency_key = Column(String, nullable=False)
+    request_hash = Column(String, nullable=False)
+    engine_version = Column(String, default="1.0")
+    checkpoint_id = Column(Integer, nullable=False, default=0)
+    recovery_generation = Column(Integer, default=2)
+
+
+class WorldOperation(Base):
+    __tablename__ = "world_operations"
+
+    id = Column(Integer, primary_key=True)
+    world_id = Column(Integer, nullable=False)
+    operation_sequence = Column(Integer, nullable=False)
+    status = Column(String, nullable=False)
+    continuity_state = Column(String, nullable=False)
+    created_at = Column(String, nullable=False)
+    requesting_user_id = Column(Integer, nullable=False)
+    client_idempotency_key = Column(String, nullable=False)
+    request_hash = Column(String, nullable=False)
+    engine_version = Column(String, default="1.0")
+    checkpoint_id = Column(Integer, nullable=False, default=0)
+
+
+class WorldEvent(Base):
+    __tablename__ = "world_events"
+
+    id = Column(Integer, primary_key=True)
+    world_id = Column(Integer, nullable=False)
+    operation_sequence = Column(Integer, nullable=False)
+    position = Column(Integer, nullable=False)
+    month = Column(Integer, nullable=False)
+    event_type = Column(String, nullable=False)
+    event_text = Column(String, nullable=False)
+    kingdom_ids = Column(Text, nullable=False)
+    event_params = Column(Text, nullable=False)
+    msg_key = Column(String, nullable=False)
+    created_at = Column(String, nullable=False)
+
+
+class OperationResolution(Base):
+    __tablename__ = "operation_resolutions"
+
+    id = Column(Integer, primary_key=True)
+    world_id = Column(Integer, nullable=False)
+    operation_id = Column(String, nullable=False)
+    resolution = Column(String, nullable=False)
+    resolved_at = Column(String, nullable=False)
+    resolution_version = Column(Integer, default=1)
+
+
+class WorldCheckpoint(Base):
+    __tablename__ = "world_checkpoints"
+
+    id = Column(Integer, primary_key=True)
+    world_id = Column(Integer, nullable=False)
+    sequence = Column(Integer, nullable=False)
+    month = Column(Integer, nullable=False)
+    checkpoint_type = Column(String, nullable=False)
+    payload = Column(String, nullable=False)  # payload stored as string (JSON bytes)
+    checksum = Column(String, nullable=False)
+    created_at = Column(String, nullable=False)
+    is_valid = Column(Integer, default=1)
+    checkpoint_version = Column(Integer, default=2)
 
 
 # Persistence: sqlite by default; set WORLDSIM_DB to any SQLAlchemy URL to
@@ -106,6 +219,9 @@ else:
     )
 
 SessionLocal = sessionmaker(bind=engine_db)
+
+# Module-level exports that tests import (CONTRACTS §17, DEC-F7D)
+logger = None  # type: ignore
 
 
 def ensure_schema() -> None:

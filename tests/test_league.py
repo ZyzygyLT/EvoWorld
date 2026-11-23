@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -9,6 +10,8 @@ from fastapi.testclient import TestClient
 import worldsim.server.app as appmod
 import worldsim.server.runner as runnermod
 from worldsim.server.db import Base
+
+_seq = itertools.count(1)
 
 
 def _fresh(tmp_path: Path):
@@ -28,12 +31,23 @@ def _fresh(tmp_path: Path):
     return TestClient(appmod.app)
 
 
-def _world(c: TestClient, **kw) -> int:
+def _world(c: TestClient, **kw) -> tuple[int, dict]:
+    """Create as an authenticated owner and PUBLISH (DEC20: anonymous
+    creation is 401; league routes below run as anonymous third parties
+    on a public world).  Returns (world_id, owner_headers)."""
+    r = c.post("/api/auth/register",
+               json={"username": f"lg{next(_seq)}", "password": "pass1234"})
+    assert r.status_code == 200, r.text
+    headers = {"Authorization": f"Bearer {r.json()['token']}"}
     body = {"seed": 42, "width": 80, "height": 50, "months": 0}
     body.update(kw)
-    r = c.post("/api/worlds", json=body)
+    r = c.post("/api/worlds", json=body, headers=headers)
     assert r.status_code == 200, r.text
-    return r.json()["id"]
+    wid = r.json()["id"]
+    r = c.put(f"/api/worlds/{wid}/visibility",
+              json={"visibility": "public"}, headers=headers)
+    assert r.status_code == 200, r.text
+    return wid, headers
 
 
 def _user(i: int = 1) -> dict:
@@ -42,7 +56,7 @@ def _user(i: int = 1) -> dict:
 
 def test_claim_and_rules(tmp_path):
     c = _fresh(tmp_path)
-    wid = _world(c, mode="league")
+    wid, _hdr = _world(c, mode="league")
 
     # claim kingdom 0
     r = c.post(f"/api/worlds/{wid}/claims", json={"kingdom_id": 0, **_user(1)})
@@ -65,14 +79,14 @@ def test_claim_and_rules(tmp_path):
 
 def test_claim_rejected_on_single_world(tmp_path):
     c = _fresh(tmp_path)
-    wid = _world(c, mode="single")
+    wid, _hdr = _world(c, mode="single")
     r = c.post(f"/api/worlds/{wid}/claims", json={"kingdom_id": 0, **_user(1)})
     assert r.status_code == 400
 
 
 def test_scoring_flows_to_standings(tmp_path):
     c = _fresh(tmp_path)
-    wid = _world(c, mode="league", months=120)
+    wid, _hdr = _world(c, mode="league", months=120)
     # two oracles claim two realms
     c.post(f"/api/worlds/{wid}/claims", json={"kingdom_id": 0, **_user(1)})
     c.post(f"/api/worlds/{wid}/claims", json={"kingdom_id": 1, **_user(2)})
@@ -100,7 +114,7 @@ def test_scoring_flows_to_standings(tmp_path):
 def test_season_end_freezes_league(tmp_path):
     c = _fresh(tmp_path)
     # tiny season: ends as soon as the runner passes it
-    wid = _world(c, mode="league", months=200)
+    wid, _hdr = _world(c, mode="league", months=200)
     r = c.post(f"/api/worlds/{wid}/claims", json={"kingdom_id": 0, **_user(1)})
     assert r.status_code == 200
 
@@ -125,20 +139,22 @@ def test_season_end_freezes_league(tmp_path):
 
 def test_enabled_races_filter(tmp_path):
     c = _fresh(tmp_path)
-    wid = _world(c, enabled_races=["Human", "Orc", "Giant"])
-    state = c.get(f"/api/worlds/{wid}").json()
+    wid, hdr = _world(c, enabled_races=["Human", "Orc", "Giant"])
+    # full state (kingdoms) is owner-only (DEC20 allowlist for third parties)
+    state = c.get(f"/api/worlds/{wid}", headers=hdr).json()
     races = {k["race"] for k in state["kingdoms"]}
     assert races <= {"Human", "Orc"}
     # fallback guard: nonsense filter restores the full set
-    wid2 = _world(c, enabled_races=["Nope"])
-    races2 = {k["race"] for k in c.get(f"/api/worlds/{wid2}").json()["kingdoms"]}
+    wid2, hdr2 = _world(c, enabled_races=["Nope"])
+    races2 = {k["race"] for k in
+              c.get(f"/api/worlds/{wid2}", headers=hdr2).json()["kingdoms"]}
     assert len(races2) > 0
 
 
 def test_world_list_carries_mode(tmp_path):
     c = _fresh(tmp_path)
-    wid = _world(c, mode="league")
-    worlds = {w["id"]: w for w in c.get("/api/worlds").json()}
+    wid, _hdr = _world(c, mode="league")
+    worlds = {w["id"]: w for w in c.get("/api/worlds").json()["worlds"]}
     assert worlds[wid]["mode"] == "league"
     assert worlds[wid]["name"]
     assert "season_over" in worlds[wid]

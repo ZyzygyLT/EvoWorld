@@ -194,6 +194,7 @@ class SimEngine:
         self.rng = rng or np.random.default_rng(seed)
         self.namegen = NameGenerator(self.rng)
         self.month: int = 0
+        self.paused: bool = False
         self.chronicle = Chronicle()
         self.kingdoms: list[Kingdom] = []
         self.wars: list[War] = []
@@ -2376,3 +2377,25 @@ class SimEngine:
         if alive:
             lines.append(f"  beasts roaming: {len(alive)} ({', '.join(b.name for b in alive)})")
         return "\n".join(lines)
+
+    # -- checkpoint serialization ---------------------------------------------
+
+    def to_checkpoint_state(self) -> dict:
+        """Devuelve una representación JSON-serializable del estado completo.
+
+        Equivalente a checkpoint_to_dict(self); proporcionada como método
+        de conveniencia sobre la instancia.
+        """
+        from worldsim.export.checkpoint import checkpoint_to_dict
+
+        return checkpoint_to_dict(self)
+
+    @classmethod
+    def from_checkpoint_state(cls, state: dict) -> "SimEngine":
+        """Reconstruye un SimEngine desde un diccionario de checkpoint.
+
+        Valida la versión y lanza ValueError si el formato es incompatible.
+        """
+        from worldsim.export.checkpoint import engine_from_checkpoint
+
+        return engine_from_checkpoint(state)

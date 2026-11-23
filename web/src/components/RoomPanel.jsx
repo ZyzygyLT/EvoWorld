@@ -38,15 +38,22 @@ export default function RoomPanel({ worldId, month, meta, claims = [], standings
         if (meta?.prediction_kinds) setKinds(meta.prediction_kinds);
     }, [meta]);
 
+    // DEC20/F7-A: world-scoped routes need the session token so the OWNER
+    // can read private worlds (third parties get 404 from the server).
+    const authHeaders = () => {
+        const tok = localStorage.getItem('worldsim_token');
+        return tok ? { 'Authorization': `Bearer ${tok}` } : {};
+    };
+
     // poll game state every few seconds (light polling; live push later)
     useEffect(() => {
         if (!worldId) return;
         const load = () => {
-            fetch(`/api/worlds/${worldId}/predictions`).then(r => r.json()).then(setPredictions).catch(() => {});
-            fetch(`/api/worlds/${worldId}/leaderboard`).then(r => r.json()).then(setBoard).catch(() => {});
+            fetch(`/api/worlds/${worldId}/predictions`, { headers: authHeaders() }).then(r => r.json()).then(setPredictions).catch(() => {});
+            fetch(`/api/worlds/${worldId}/leaderboard`, { headers: authHeaders() }).then(r => r.json()).then(setBoard).catch(() => {});
         };
         const loadChat = () => {
-            fetch(`/api/worlds/${worldId}/chat`).then(r => r.json()).then(setChat).catch(() => {});
+            fetch(`/api/worlds/${worldId}/chat`, { headers: authHeaders() }).then(r => r.json()).then(setChat).catch(() => {});
         };
         load(); loadChat();
         const iv = setInterval(() => { load(); loadChat(); }, 4000);
@@ -75,13 +82,13 @@ export default function RoomPanel({ worldId, month, meta, claims = [], standings
         };
         const r = await fetch(`/api/worlds/${worldId}/predictions`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify(body),
         });
         if (r.ok) {
             setPending(null);
             const preds = await r.json.call ? null : null;
-            fetch(`/api/worlds/${worldId}/predictions`).then(r => r.json()).then(setPredictions);
+            fetch(`/api/worlds/${worldId}/predictions`, { headers: authHeaders() }).then(r => r.json()).then(setPredictions);
         }
     };
 
@@ -90,13 +97,13 @@ export default function RoomPanel({ worldId, month, meta, claims = [], standings
         if (!ensureIdentity() || !chatInput.trim()) return;
         await fetch(`/api/worlds/${worldId}/chat`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify({
                 user_token: identity, user_name: name.trim(), text: chatInput.trim(),
             }),
         });
         setChatInput('');
-        fetch(`/api/worlds/${worldId}/chat`).then(r => r.json()).then(setChat);
+        fetch(`/api/worlds/${worldId}/chat`, { headers: authHeaders() }).then(r => r.json()).then(setChat);
     };
 
     const KIND_ORDER = ['war_victory', 'era_reach', 'rebellion_any', 'first_city', 'plague', 'beast_slain'];
