@@ -7,7 +7,7 @@ import StatsPanel from './StatsPanel.jsx';
  * Canvas world map with pan/zoom + political overlay + site markers.
  * Re-fits the camera on every world load; survives canvas resizes.
  */
-export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection, claims = [], worldMode = 'single', onClaim, lang = 'es', canvasRef: externalRef, followId = null, onFollowClear, warFocus = null, fixed = true, onToggleFixed }) {
+export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome', onSiteClick, onBackgroundClick, onMapMode, stats, govDesc, onClearSelection, claims = [], worldMode = 'single', onClaim, lang = 'es', canvasRef: externalRef, followId = null, onFollowClear, warFocus = null, fixed = true, onToggleFixed, availableMapModes = ['biome', 'realms', 'political', 'battles'] }) {
     const canvasRef = useRef(null);
     // expose the canvas for PNG export
     useEffect(() => {
@@ -559,7 +559,7 @@ export default function WorldMap({ state, tick, mode = 'biome', mapMode = 'biome
                         {fixed ? '🔒 fijo' : '🔓 libre'}
                     </button>
                 )}
-                {['biome', 'realms', 'political', 'battles'].map(m => (
+                {availableMapModes.map(m => (
                     <button
                         key={m}
                         onClick={() => onMapMode && onMapMode(m)}
