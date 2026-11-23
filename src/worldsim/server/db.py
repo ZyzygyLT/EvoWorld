@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import (CheckConstraint, Column, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, event, inspect, text)
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
@@ -35,7 +35,15 @@ class WorldRow(Base):
     enabled_races_json = Column(String, default="")  # JSON list, "" = all
     owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     sea_level = Column(Float, default=0.2)  # ocean threshold used at generation
+    status = Column(String(20), nullable=False, default="running", server_default="running")
+    last_checkpoint_at = Column(String, nullable=True)
+    checkpoint_count = Column(Integer, nullable=False, default=0, server_default="0")
+    checkpoint_version = Column(Integer, nullable=True)
+    visibility = Column(String(7), nullable=False, default="private", server_default="private")
+    next_operation_sequence = Column(Integer, nullable=False, default=1, server_default="1")
     deleted_at = Column(DateTime, nullable=True)  # NULL: mundo activo; timestamp: eliminado lógicamente
+
+    __table_args__ = (CheckConstraint("visibility IN ('private', 'public')", name="ck_worlds_visibility"),)
 
 
 class ClaimRow(Base):
@@ -88,6 +96,7 @@ class UserRow(Base):
     username = Column(String, unique=True, index=True)
     pw_hash = Column(String)  # pbkdf2-sha256(salt, password), hex
     created_at = Column(String)
+    is_admin = Column(Integer, nullable=False, default=0, server_default="0")
 
 
 class SessionRow(Base):
@@ -148,27 +157,52 @@ class ChallengeOperationRow(Base):
     recovery_generation = Column(Integer, default=2)
 
 
+
 class WorldOperation(Base):
     __tablename__ = "world_operations"
-
-    id = Column(Integer, primary_key=True)
+    __table_args__ = (
+        UniqueConstraint("world_id", "operation_id", name="uq_world_operation_id"),
+        UniqueConstraint("world_id", "operation_sequence", name="uq_world_operation_sequence"),
+        UniqueConstraint("world_id", "requesting_user_id", "client_idempotency_key", name="uq_world_operation_idempotency"),
+        CheckConstraint("status IN ('pending','executing','confirmed','blocked','failed','canceled')", name="ck_world_operation_status"),
+        CheckConstraint("continuity_state IN ('active','blocked','released')", name="ck_world_operation_continuity"),
+        CheckConstraint("((status = 'confirmed' AND continuity_state = 'active') OR (status IN ('pending','executing','blocked') AND continuity_state = 'active') OR (status IN ('failed','canceled') AND continuity_state IN ('blocked','released')))", name="ck_world_operation_status_continuity"),
+        Index("ix_world_operations_world_id", "world_id"),
+        ForeignKeyConstraint(["world_id"], ["worlds.id"], ondelete="CASCADE"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
     world_id = Column(Integer, nullable=False)
+    operation_id = Column(String(64), nullable=False)
     operation_sequence = Column(Integer, nullable=False)
-    status = Column(String, nullable=False)
-    continuity_state = Column(String, nullable=False)
+    status = Column(String(20), nullable=False)
+    continuity_state = Column(String(20), nullable=False)
     created_at = Column(String, nullable=False)
+    confirmed_at = Column(String, nullable=True)
     requesting_user_id = Column(Integer, nullable=False)
-    client_idempotency_key = Column(String, nullable=False)
-    request_hash = Column(String, nullable=False)
-    engine_version = Column(String, default="1.0")
-    checkpoint_id = Column(Integer, nullable=False, default=0)
+    client_idempotency_key = Column(String(128), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    engine_version = Column(String(32), nullable=True, default="1.0")
+    checkpoint_id = Column(Integer, ForeignKey("world_checkpoints.id"), nullable=True)
+    payload_ref = Column(Text, nullable=True)
+    rng_state_ref = Column(Text, nullable=True)
+    recovery_state = Column(Text, nullable=True)
+    initial_checkpoint_id = Column(Integer, ForeignKey("world_checkpoints.id"), nullable=True)
+    recovery_attempt_id = Column(String(36), nullable=True)
+    recovery_generation = Column(Integer, nullable=False, default=0, server_default="0")
 
 
 class WorldEvent(Base):
     __tablename__ = "world_events"
-
-    id = Column(Integer, primary_key=True)
+    __table_args__ = (
+        ForeignKeyConstraint(["world_id"], ["worlds.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["world_id", "operation_id"], ["world_operations.world_id", "world_operations.operation_id"], ondelete="CASCADE", name="fk_world_event_operation"),
+        UniqueConstraint("world_id", "operation_id", "position", name="uq_world_event_operation_position"),
+        CheckConstraint("position >= 0", name="ck_world_event_position"),
+        Index("ix_world_events_world_sequence", "world_id", "operation_sequence"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
     world_id = Column(Integer, nullable=False)
+    operation_id = Column(String(64), nullable=False)
     operation_sequence = Column(Integer, nullable=False)
     position = Column(Integer, nullable=False)
     month = Column(Integer, nullable=False)
@@ -182,28 +216,45 @@ class WorldEvent(Base):
 
 class OperationResolution(Base):
     __tablename__ = "operation_resolutions"
-
-    id = Column(Integer, primary_key=True)
+    __table_args__ = (
+        ForeignKeyConstraint(["world_id"], ["worlds.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["world_id", "operation_id"], ["world_operations.world_id", "world_operations.operation_id"], ondelete="CASCADE", name="fk_operation_resolution_operation"),
+        UniqueConstraint("world_id", "operation_id", "idempotency_key", name="uq_operation_resolution_idempotency"),
+        CheckConstraint("resolution_type IN ('confirmed_no_effects','continue_with_gap','remain_blocked')", name="ck_operation_resolution_type"),
+        Index("ix_operation_resolutions_world_id", "world_id"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
     world_id = Column(Integer, nullable=False)
-    operation_id = Column(String, nullable=False)
-    resolution = Column(String, nullable=False)
-    resolved_at = Column(String, nullable=False)
-    resolution_version = Column(Integer, default=1)
+    operation_id = Column(String(64), nullable=False)
+    operation_sequence = Column(Integer, nullable=False)
+    admin_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    resolution_type = Column(String(32), nullable=False)
+    reason = Column(Text, nullable=False)
+    evidence_refs = Column(Text, nullable=True)
+    resolution_version = Column(Integer, nullable=False, default=1, server_default="1")
+    created_at = Column(String, nullable=False)
+    idempotency_key = Column(String(128), nullable=False)
 
 
 class WorldCheckpoint(Base):
     __tablename__ = "world_checkpoints"
-
-    id = Column(Integer, primary_key=True)
+    __table_args__ = (
+        UniqueConstraint("world_id", "sequence", name="uq_world_checkpoint_seq"),
+        ForeignKeyConstraint(["world_id"], ["worlds.id"], ondelete="CASCADE"),
+        Index("ix_world_checkpoints_world_id", "world_id"),
+        Index("ix_world_checkpoints_world_month", "world_id", "month"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
     world_id = Column(Integer, nullable=False)
     sequence = Column(Integer, nullable=False)
     month = Column(Integer, nullable=False)
-    checkpoint_type = Column(String, nullable=False)
-    payload = Column(String, nullable=False)  # payload stored as string (JSON bytes)
-    checksum = Column(String, nullable=False)
+    checkpoint_type = Column(String(20), nullable=False)
+    payload = Column(LargeBinary, nullable=False)
+    checksum = Column(String(64), nullable=False)
     created_at = Column(String, nullable=False)
-    is_valid = Column(Integer, default=1)
-    checkpoint_version = Column(Integer, default=2)
+    is_valid = Column(Integer, nullable=False, default=1, server_default="1")
+    checkpoint_version = Column(Integer, nullable=False, default=2, server_default="2")
+
 
 
 # Persistence: sqlite by default; set WORLDSIM_DB to any SQLAlchemy URL to
@@ -219,36 +270,108 @@ else:
     )
 
 SessionLocal = sessionmaker(bind=engine_db)
-
-# Module-level exports that tests import (CONTRACTS §17, DEC-F7D)
 logger = None  # type: ignore
 
+_F7C_TABLES = ("world_operations", "world_events", "operation_resolutions")
+_F7C_REQUIRED_COLUMNS = {
+    "world_operations": {"world_id", "operation_id", "operation_sequence", "status", "continuity_state", "created_at", "confirmed_at", "requesting_user_id", "client_idempotency_key", "request_hash", "engine_version", "checkpoint_id", "payload_ref", "rng_state_ref", "recovery_state", "initial_checkpoint_id", "recovery_attempt_id", "recovery_generation"},
+    "world_events": {"world_id", "operation_id", "operation_sequence", "position", "month", "event_type", "event_text", "kingdom_ids", "event_params", "msg_key", "created_at"},
+    "operation_resolutions": {"world_id", "operation_id", "operation_sequence", "admin_user_id", "resolution_type", "reason", "evidence_refs", "resolution_version", "created_at", "idempotency_key"},
+}
 
-def ensure_schema() -> None:
-    """Create tables + migrate old DBs (dev worlds.db predates league columns).
 
-    create_all only creates MISSING tables; SQLite has no ADD COLUMN via
-    SQLAlchemy migrations, so new columns on existing tables are added
-    explicitly. Without this, any select on an old DB raises
-    OperationalError (which once killed the shared runner task silently).
-    """
-    from sqlalchemy import inspect, text
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
 
-    Base.metadata.create_all(engine_db)
-    if engine_db.dialect.name != "sqlite":
+
+def _configure_engine(target_engine) -> None:
+    if target_engine.dialect.name == "sqlite" and not event.contains(target_engine, "connect", _enable_sqlite_foreign_keys):
+        event.listen(target_engine, "connect", _enable_sqlite_foreign_keys)
+
+
+def _replace_empty_legacy_f7c_tables(conn) -> None:
+    """Replace obsolete F7-C tables only after proving the complete family empty."""
+    inspector = inspect(conn)
+    existing = set(inspector.get_table_names())
+    obsolete = any(
+        table in existing
+        and not required.issubset({c["name"] for c in inspector.get_columns(table)})
+        for table, required in _F7C_REQUIRED_COLUMNS.items()
+    )
+    if not obsolete:
         return
-    insp = inspect(engine_db)
-    with engine_db.begin() as conn:
-        for table_name, table in Base.metadata.tables.items():
-            if table_name not in insp.get_table_names():
-                continue
-            existing = {c["name"] for c in insp.get_columns(table_name)}
-            for col in table.columns:
-                if col.name not in existing and col.name != "id":
-                    default = f" DEFAULT {col.server_default.arg}" if col.server_default else ""
-                    conn.execute(
-                        text(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col.type}{default}")
-                    )
+
+    counts = {
+        table: int(conn.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar_one())
+        if table in existing else 0
+        for table in _F7C_TABLES
+    }
+    if any(counts.values()):
+        raise RuntimeError(
+            "Cannot migrate legacy F7-C schema: historical rows exist; "
+            f"refusing destructive replacement (counts={counts})"
+        )
+
+    for table in ("world_events", "operation_resolutions", "world_operations"):
+        if table in existing:
+            conn.execute(text(f'DROP TABLE "{table}"'))
 
 
-ensure_schema()  # migrate old dev DBs in place (ADD COLUMN is idempotent-safe)
+def ensure_schema(target_engine=None) -> None:
+    """Create and explicitly migrate schema (DEC02; no import-time side effects).
+
+    Existing worlds are not rebuilt: the F7-C allocator is added in place.
+    Legacy F7-C tables are replaced only when every affected table is empty.
+    SQLite migration DDL and data changes are atomic.
+    """
+    target = target_engine or engine_db
+    _configure_engine(target)
+
+    if target.dialect.name != "sqlite":
+        Base.metadata.create_all(target)
+        return
+
+    with target.begin() as conn:
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+
+        _replace_empty_legacy_f7c_tables(conn)
+        Base.metadata.create_all(conn)
+
+        user_columns = {c["name"]: c for c in inspect(conn).get_columns("users")}
+        if "is_admin" not in user_columns:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"
+            ))
+
+        columns = {c["name"]: c for c in inspect(conn).get_columns("worlds")}
+        if "next_operation_sequence" not in columns:
+            conn.execute(text(
+                "ALTER TABLE worlds ADD COLUMN "
+                "next_operation_sequence INTEGER NOT NULL DEFAULT 1"
+            ))
+        elif columns["next_operation_sequence"]["nullable"]:
+            raise RuntimeError(
+                "worlds.next_operation_sequence exists but is nullable; "
+                "refusing an implicit SQLite table rebuild"
+            )
+
+        conn.execute(text(
+            "UPDATE worlds SET next_operation_sequence = "
+            "(SELECT COALESCE(MAX(operation_sequence), 0) + 1 "
+            "FROM world_operations "
+            "WHERE world_operations.world_id = worlds.id) "
+            "WHERE next_operation_sequence <= "
+            "(SELECT COALESCE(MAX(operation_sequence), 0) "
+            "FROM world_operations "
+            "WHERE world_operations.world_id = worlds.id)"
+        ))
+
+        violations = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
+        if violations:
+            raise RuntimeError(
+                f"Foreign-key violations after schema migration: {violations[:10]}"
+            )

@@ -115,6 +115,7 @@ async def lifespan(app: FastAPI):
     (Etapa 4 / DEC14 — refuse new ones, wait for the active ones).  The
     global drain/close (DEC17) still belongs to Etapa 6.
     """
+    db.ensure_schema()  # DEC02: schema migration is explicit and precedes recovery.
     coordinator = await run_startup(session_factory=db.SessionLocal, registry=registry)
     app.state.coordinator = coordinator
     try:
