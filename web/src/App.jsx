@@ -5,6 +5,7 @@ import ChroniclePanel from './components/ChroniclePanel.jsx';
 import StartScreen from './components/StartScreen.jsx';
 import Timeline from './components/Timeline.jsx';
 import WorldBar from './components/WorldBar.jsx';
+import HistoricalArchive from './components/HistoricalArchive.jsx';
 import { DEFAULT_LANG, t } from './i18n.js';
 import { ensureIdentity, getIdentity } from './identity.js';
 
@@ -38,6 +39,7 @@ export default function App() {
     const [lang, setLang] = useState(() => localStorage.getItem('worldsim_lang') || DEFAULT_LANG);
     const [user, setUser] = useState(null);  // {username, user_id} when logged in
     const [showLogin, setShowLogin] = useState(false);
+    const [showHistoricalArchive, setShowHistoricalArchive] = useState(false);
     const [showTutorial, setShowTutorial] = useState(
         () => !localStorage.getItem('worldsim_tutorial_done'));
     const [createError, setCreateError] = useState(null);
@@ -401,6 +403,7 @@ export default function App() {
                     </span>
                     <span style={{ flex: 1 }} />
                     <LangToggle lang={lang} onChange={setLangAndSave} />
+                    <button style={{ ...btn, fontSize: 11, padding: '2px 8px' }} onClick={() => setShowHistoricalArchive(true)}>📚 Archivo local</button>
                     <AuthButton user={user} onLogin={() => setShowLogin(true)} onLogout={doLogout} t={(k) => t(lang, k)} />
                 </header>
                 <StartScreen
@@ -452,6 +455,7 @@ export default function App() {
                         t={(k) => t(lang, k)}
                     />
                 )}
+                {showHistoricalArchive && <HistoricalArchive onClose={() => setShowHistoricalArchive(false)} lang={lang} />}
             </div>
         );
     }

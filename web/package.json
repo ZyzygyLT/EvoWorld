@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "test:archive": "node --test src/historicalArchive.test.js"
   },
   "dependencies": {
     "react": "^18.3.1",
