@@ -31,7 +31,7 @@ Requisitos:
 - Abrir SQLite con URI `mode=ro` y verificar que el archivo fuente no cambia.
 - Aceptar únicamente el esquema histórico inspeccionado y columnas esperadas; no asumir que el esquema actual es compatible.
 - Leer únicamente `worlds` y sus campos históricos necesarios: `id`, `seed`, `months_simulated`, `land_pct`, `created_at`, `state_json` (y `name` solo si existe).
-- Validar cada `state_json`: JSON objeto, dimensiones, matrices, longitudes y tipos antes de exportar.
+- Validar cada `state_json`: JSON objeto, dimensiones, matrices, longitudes y tipos antes de exportar. `world.elevation` puede estar ausente en snapshots legacy; si existe, debe tener `width * height` valores numéricos válidos. No sintetizar elevaciones.
 - Conservar el estado histórico original; incluir metadatos de procedencia (hash SHA-256 del snapshot, identificador del commit fuente, ID de fila) sin modificar el payload.
 - Versionar el formato del paquete, por ejemplo `format = "evoworld-historical-archive"` y `format_version = 1`.
 - No incluir credenciales, usuarios ni tablas ajenas a `worlds`.
