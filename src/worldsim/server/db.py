@@ -293,9 +293,9 @@ def _configure_engine(target_engine) -> None:
         event.listen(target_engine, "connect", _enable_sqlite_foreign_keys)
 
 
-def _replace_empty_legacy_f7c_tables(target_engine) -> None:
+def _replace_empty_legacy_f7c_tables(conn) -> None:
     """Replace obsolete F7-C tables only after proving the complete family empty."""
-    inspector = inspect(target_engine)
+    inspector = inspect(conn)
     existing = set(inspector.get_table_names())
     obsolete = any(
         table in existing
@@ -305,19 +305,20 @@ def _replace_empty_legacy_f7c_tables(target_engine) -> None:
     if not obsolete:
         return
 
-    with target_engine.begin() as conn:
-        counts = {
-            table: int(conn.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar_one()) if table in existing else 0
-            for table in _F7C_TABLES
-        }
-        if any(counts.values()):
-            raise RuntimeError(
-                "Cannot migrate legacy F7-C schema: historical rows exist; "
-                f"refusing destructive replacement (counts={counts})"
-            )
-        for table in ("world_events", "operation_resolutions", "world_operations"):
-            if table in existing:
-                conn.execute(text(f'DROP TABLE "{table}"'))
+    counts = {
+        table: int(conn.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar_one())
+        if table in existing else 0
+        for table in _F7C_TABLES
+    }
+    if any(counts.values()):
+        raise RuntimeError(
+            "Cannot migrate legacy F7-C schema: historical rows exist; "
+            f"refusing destructive replacement (counts={counts})"
+        )
+
+    for table in ("world_events", "operation_resolutions", "world_operations"):
+        if table in existing:
+            conn.execute(text(f'DROP TABLE "{table}"'))
 
 
 def ensure_schema(target_engine=None) -> None:
@@ -325,25 +326,33 @@ def ensure_schema(target_engine=None) -> None:
 
     Existing worlds are not rebuilt: the F7-C allocator is added in place.
     Legacy F7-C tables are replaced only when every affected table is empty.
+    SQLite migration DDL and data changes are atomic.
     """
     target = target_engine or engine_db
     _configure_engine(target)
-    if target.dialect.name == "sqlite":
-        _replace_empty_legacy_f7c_tables(target)
 
-    Base.metadata.create_all(target)
     if target.dialect.name != "sqlite":
+        Base.metadata.create_all(target)
         return
 
     with target.begin() as conn:
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+
+        _replace_empty_legacy_f7c_tables(conn)
+        Base.metadata.create_all(conn)
+
         user_columns = {c["name"]: c for c in inspect(conn).get_columns("users")}
         if "is_admin" not in user_columns:
             conn.execute(text(
                 "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"
             ))
+
         columns = {c["name"]: c for c in inspect(conn).get_columns("worlds")}
         if "next_operation_sequence" not in columns:
-            conn.execute(text("ALTER TABLE worlds ADD COLUMN next_operation_sequence INTEGER NOT NULL DEFAULT 1"))
+            conn.execute(text(
+                "ALTER TABLE worlds ADD COLUMN "
+                "next_operation_sequence INTEGER NOT NULL DEFAULT 1"
+            ))
         elif columns["next_operation_sequence"]["nullable"]:
             raise RuntimeError(
                 "worlds.next_operation_sequence exists but is nullable; "
@@ -352,12 +361,17 @@ def ensure_schema(target_engine=None) -> None:
 
         conn.execute(text(
             "UPDATE worlds SET next_operation_sequence = "
-            "(SELECT COALESCE(MAX(operation_sequence), 0) + 1 FROM world_operations "
+            "(SELECT COALESCE(MAX(operation_sequence), 0) + 1 "
+            "FROM world_operations "
             "WHERE world_operations.world_id = worlds.id) "
             "WHERE next_operation_sequence <= "
-            "(SELECT COALESCE(MAX(operation_sequence), 0) FROM world_operations "
+            "(SELECT COALESCE(MAX(operation_sequence), 0) "
+            "FROM world_operations "
             "WHERE world_operations.world_id = worlds.id)"
         ))
+
         violations = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
         if violations:
-            raise RuntimeError(f"Foreign-key violations after schema migration: {violations[:10]}")
+            raise RuntimeError(
+                f"Foreign-key violations after schema migration: {violations[:10]}"
+            )

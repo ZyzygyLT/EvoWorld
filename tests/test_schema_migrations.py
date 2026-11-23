@@ -396,3 +396,87 @@ def test_migrated_counter_rejects_explicit_null(migrated):
                 "INSERT INTO worlds (id, status, checkpoint_count, "
                 "next_operation_sequence) VALUES (2, 'running', 0, NULL)"
             ))
+from sqlalchemy import event
+
+
+@pytest.mark.parametrize("fragment", [
+    'DROP TABLE "operation_resolutions"',
+    "CREATE TABLE world_operations",
+    "ALTER TABLE users ADD COLUMN is_admin",
+    "ALTER TABLE worlds ADD COLUMN",
+    "UPDATE worlds SET next_operation_sequence",
+    "PRAGMA foreign_key_check",
+])
+def test_migration_failure_rolls_back_and_retry_succeeds(tmp_path, fragment):
+    import worldsim.server.db as dbmod
+
+    db_file = tmp_path / "atomic-legacy.db"
+    _build_pre_f7c_db(db_file)
+    failing_engine = create_engine(f"sqlite:///{db_file}")
+    fired = {"value": False}
+
+    def inject_failure(conn, cursor, statement, parameters, context, executemany):
+        if not fired["value"] and fragment in statement:
+            fired["value"] = True
+            raise RuntimeError(f"injected migration failure: {fragment}")
+
+    event.listen(failing_engine, "before_cursor_execute", inject_failure)
+
+    with pytest.raises(RuntimeError, match="injected migration failure"):
+        dbmod.ensure_schema(failing_engine)
+
+    assert fired["value"] is True
+    failing_engine.dispose()
+
+    # The complete original schema and its data must survive the rollback.
+    check_engine = create_engine(f"sqlite:///{db_file}")
+    with check_engine.connect() as conn:
+        inspector = inspect(conn)
+
+        assert "is_admin" not in {c["name"] for c in inspector.get_columns("users")}
+        assert "next_operation_sequence" not in {
+            c["name"] for c in inspector.get_columns("worlds")
+        }
+        assert "checkpoint_id" in {
+            c["name"] for c in inspector.get_columns("world_operations")
+        }
+        assert "operation_id" not in {
+            c["name"] for c in inspector.get_columns("world_events")
+        }
+        assert "admin_user_id" not in {
+            c["name"] for c in inspector.get_columns("operation_resolutions")
+        }
+
+        assert conn.execute(text(
+            "SELECT username FROM users WHERE id=7"
+        )).scalar_one() == "admin"
+        assert conn.execute(text(
+            "SELECT name FROM worlds WHERE id=1"
+        )).scalar_one() == "legacy-world"
+
+        assert conn.execute(text("PRAGMA foreign_key_check")).fetchall() == []
+        assert conn.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+
+    check_engine.dispose()
+
+    # A fresh attempt must complete the migration successfully.
+    retry_engine = create_engine(f"sqlite:///{db_file}")
+    dbmod.ensure_schema(retry_engine)
+
+    with retry_engine.connect() as conn:
+        inspector = inspect(conn)
+
+        assert "is_admin" in {c["name"] for c in inspector.get_columns("users")}
+        assert "next_operation_sequence" in {
+            c["name"] for c in inspector.get_columns("worlds")
+        }
+        assert "operation_id" in {
+            c["name"] for c in inspector.get_columns("world_operations")
+        }
+        assert conn.execute(text(
+            "SELECT next_operation_sequence FROM worlds WHERE id=1"
+        )).scalar_one() == 1
+        assert conn.execute(text("PRAGMA foreign_key_check")).fetchall() == []
+        assert conn.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+
+    retry_engine.dispose()
