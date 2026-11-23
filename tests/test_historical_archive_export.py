@@ -60,6 +60,17 @@ def test_build_archive_exports_only_world_rows_and_source_hash(tmp_path):
     assert hashlib.sha256(source.read_bytes()).hexdigest() == before
 
 
+def test_exports_legacy_map_when_elevation_is_absent(tmp_path):
+    state = _state()
+    del state["world"]["elevation"]
+    source = _snapshot(tmp_path / "legacy-no-elevation.db", state)
+
+    archive = build_archive([source])
+
+    exported = archive["sources"][0]["worlds"][0]["state"]
+    assert "elevation" not in exported["world"]
+
+
 def test_export_archive_writes_package_without_touching_source(tmp_path):
     source = _snapshot(tmp_path / "historic.db")
     before = source.read_bytes()
