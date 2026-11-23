@@ -76,3 +76,15 @@ test('rejects a settlement outside the map', () => {
     archive.sources[0].worlds[0].state.kingdoms[0].sites[0].x = 9;
     assert.throws(() => validateHistoricalArchive(archive), /fuera del mapa/);
 });
+
+test('rejects malformed chronicle records before rendering', () => {
+    const archive = makeArchive();
+    archive.sources[0].worlds[0].state.chronicle = [null];
+    assert.throws(() => validateHistoricalArchive(archive), /evento de crónica/);
+});
+
+test('rejects beasts outside the map', () => {
+    const archive = makeArchive();
+    archive.sources[0].worlds[0].state.beasts[0].x = 8;
+    assert.throws(() => validateHistoricalArchive(archive), /bestia fuera del mapa/);
+});
