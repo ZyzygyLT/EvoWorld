@@ -27,6 +27,8 @@ jobs:
       - name: Install pytest
         run: python -m pip install pytest
       - name: Test read-only SQLite exporter
+        env:
+          PYTHONPATH: src:.
         run: python -m pytest -q tests/test_historical_archive_export.py
       - name: Install web dependencies
         working-directory: web
