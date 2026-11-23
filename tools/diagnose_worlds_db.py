@@ -93,10 +93,11 @@ def diagnose(db_path: str | Path) -> dict[str, Any]:
     conn.execute("PRAGMA query_only = ON")
     try:
         objects = conn.execute(
-            "SELECT name, type FROM sqlite_master "
+            "SELECT name, type, sql FROM sqlite_master "
             "WHERE type IN ('table','view','index','trigger') AND name NOT LIKE 'sqlite_%' "
             "ORDER BY type, name"
         ).fetchall()
+        ddl_by_name = {row["name"]: row["sql"] for row in objects}
         tables = [row["name"] for row in objects if row["type"] == "table"]
         views = [row["name"] for row in objects if row["type"] == "view"]
         triggers = [row["name"] for row in objects if row["type"] == "trigger"]
@@ -117,6 +118,7 @@ def diagnose(db_path: str | Path) -> dict[str, Any]:
                 f"PRAGMA foreign_key_list({quote_ident(table)})"
             )]
             schema[table] = {
+                "create_sql": ddl_by_name.get(table),
                 "columns": [{"name": c["name"], "type": c["type"],
                              "notnull": bool(c["notnull"]), "primary_key_position": c["pk"]}
                             for c in cols],
@@ -135,7 +137,8 @@ def diagnose(db_path: str | Path) -> dict[str, Any]:
         }
         required = {
             "worlds": ["deleted_at", "visibility", "status", "next_operation_sequence"],
-            "world_operations": ["operation_id", "operation_sequence", "client_idempotency_key", "status"],
+            "world_operations": ["operation_id", "operation_sequence", "requesting_user_id",
+                                 "client_idempotency_key", "request_hash", "status"],
             "world_events": ["operation_id", "operation_sequence"],
             "operation_resolutions": ["resolution", "resolved_at", "resolution_type", "idempotency_key"],
             "challenges": ["closed_at", "completed_at", "state"],
@@ -208,13 +211,23 @@ def diagnose(db_path: str | Path) -> dict[str, Any]:
 
         if "world_events" in tables and "world_operations" in tables:
             ec, oc = table_columns["world_events"], table_columns["world_operations"]
-            if all(_has(ec, c) for c in ("world_id", "operation_sequence")) and all(
+            if all(_has(ec, c) for c in ("world_id", "operation_id")) and all(
+                _has(oc, c) for c in ("world_id", "operation_id")
+            ):
+                diagnostics["operation_integrity"]["events_without_matching_operation_rows"] = int(
+                    conn.execute("SELECT COUNT(*) FROM world_events e WHERE NOT EXISTS "
+                                 "(SELECT 1 FROM world_operations o WHERE "
+                                 "o.world_id=e.world_id AND o.operation_id=e.operation_id)"
+                                 ).fetchone()[0])
+            elif all(_has(ec, c) for c in ("world_id", "operation_sequence")) and all(
                 _has(oc, c) for c in ("world_id", "operation_sequence")
             ):
                 diagnostics["operation_integrity"]["events_without_matching_operation_rows"] = int(
-                    conn.execute("SELECT COUNT(*) FROM world_events e LEFT JOIN world_operations o "
-                                 "ON o.world_id=e.world_id AND o.operation_sequence=e.operation_sequence "
-                                 "WHERE o.rowid IS NULL").fetchone()[0])
+                    conn.execute("SELECT COUNT(*) FROM world_events e WHERE NOT EXISTS "
+                                 "(SELECT 1 FROM world_operations o WHERE "
+                                 "o.world_id=e.world_id AND "
+                                 "o.operation_sequence=e.operation_sequence)"
+                                 ).fetchone()[0])
 
         if "challenge_operations" in tables:
             cc = table_columns["challenge_operations"]
@@ -247,7 +260,8 @@ def diagnose(db_path: str | Path) -> dict[str, Any]:
                        "foreign_key_violation_count": len(fk_violations),
                        "foreign_key_violations": fk_violations},
             "inventory": {"tables": tables, "views": views, "triggers": triggers,
-                          "row_counts": counts, "schema": schema},
+                          "row_counts": counts, "schema": schema,
+                          "schema_sql": {row["name"]: row["sql"] for row in objects}},
             "diagnostics": diagnostics,
             "safety": {"read_only_uri": True, "query_only": True,
                        "application_imported": False, "data_rows_exported": False,
