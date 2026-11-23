@@ -13,7 +13,6 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
-from urllib.parse import quote
 
 FORMAT = "evoworld-historical-archive"
 FORMAT_VERSION = 1
@@ -96,7 +95,7 @@ def read_snapshot(snapshot_path: str | Path) -> dict:
     if not path.is_file():
         raise ArchiveExportError(f"not a file: {path}")
 
-    uri = f"file:{quote(str(path))}?mode=ro"
+    uri = path.as_uri() + "?mode=ro"
     try:
         connection = sqlite3.connect(uri, uri=True)
         connection.row_factory = sqlite3.Row
