@@ -10,6 +10,8 @@ import sqlite3
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError
 
 
 def _build_pre_f7c_db(path) -> None:
@@ -307,3 +309,90 @@ def test_stale_counter_is_repaired_without_renumbering_operations(migrated):
         assert conn.execute(text(
             "SELECT operation_sequence FROM world_operations ORDER BY operation_sequence"
         )).fetchall() == [(4,), (6,)]
+
+
+def test_healthy_counter_is_never_rewound(migrated):
+    with migrated.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO world_operations (world_id, operation_id, operation_sequence, "
+            "status, continuity_state, created_at, requesting_user_id, "
+            "client_idempotency_key, request_hash) VALUES "
+            "(1, 'healthy-1', 1, 'confirmed', 'active', 't', 7, 'h1', 'hash1'), "
+            "(1, 'healthy-2', 2, 'confirmed', 'active', 't', 7, 'h2', 'hash2')"
+        ))
+        conn.execute(text(
+            "UPDATE worlds SET next_operation_sequence=10 WHERE id=1"
+        ))
+
+    import worldsim.server.db as dbmod
+    dbmod.ensure_schema(migrated)
+
+    with migrated.connect() as conn:
+        assert conn.execute(text(
+            "SELECT next_operation_sequence FROM worlds WHERE id=1"
+        )).scalar_one() == 10
+
+
+def test_counter_repair_is_independent_per_world(migrated):
+    with migrated.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO worlds (id, seed, width, height, months_simulated, "
+            "state_json, created_at, name, mode, status, checkpoint_count, "
+            "visibility, next_operation_sequence) "
+            "VALUES (2, 43, 8, 8, 0, '{}', 't', 'second-world', "
+            "'single', 'running', 0, 'private', 7)"
+        ))
+        conn.execute(text(
+            "INSERT INTO world_operations (world_id, operation_id, operation_sequence, "
+            "status, continuity_state, created_at, requesting_user_id, "
+            "client_idempotency_key, request_hash) VALUES "
+            "(1, 'world1-op4', 4, 'confirmed', 'active', 't', 7, 'w1k4', 'hash4'), "
+            "(1, 'world1-op6', 6, 'confirmed', 'active', 't', 7, 'w1k6', 'hash6')"
+        ))
+        conn.execute(text(
+            "UPDATE worlds SET next_operation_sequence=1 WHERE id=1"
+        ))
+
+    import worldsim.server.db as dbmod
+    dbmod.ensure_schema(migrated)
+
+    with migrated.connect() as conn:
+        counters = conn.execute(text(
+            "SELECT id, next_operation_sequence FROM worlds ORDER BY id"
+        )).fetchall()
+
+    assert counters == [(1, 7), (2, 7)]
+
+
+def test_t1_allocates_sequence_after_schema_migration(migrated):
+    from sqlalchemy.orm import sessionmaker
+    from worldsim.server.operation_service import OperationParams, OperationService
+
+    Session = sessionmaker(bind=migrated)
+    service = OperationService(Session, engine_version="1.0")
+    params = OperationParams(
+        world_id=1,
+        operation_type="advance",
+        months=1,
+    )
+
+    result = service.reserve_operation(1, 7, "migration-key", params)
+
+    assert result.operation.operation_sequence == 1
+    assert result.operation.status == "pending"
+
+    with Session() as session:
+        counter = session.execute(text(
+            "SELECT next_operation_sequence FROM worlds WHERE id=1"
+        )).scalar_one()
+
+    assert counter == 2
+
+
+def test_migrated_counter_rejects_explicit_null(migrated):
+    with pytest.raises(IntegrityError, match="NOT NULL"):
+        with migrated.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO worlds (id, status, checkpoint_count, "
+                "next_operation_sequence) VALUES (2, 'running', 0, NULL)"
+            ))
