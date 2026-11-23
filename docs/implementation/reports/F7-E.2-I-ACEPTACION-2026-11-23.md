@@ -30,7 +30,7 @@ Suite ejecutada desde el worktree `evoworld-f7e-logical-delete`, con `PYTHONPATH
 
 El warning corresponde a la deprecación de la integración `httpx` con `starlette.testclient`.
 
-`git -c core.whitespace=cr-at-eol diff --check` no report? errores de whitespace. Git mostr? avisos informativos de conversi?n LF/CRLF en dos archivos de pruebas.
+`git -c core.whitespace=cr-at-eol diff --check` no reportó errores de whitespace. Git mostró avisos informativos de conversión LF/CRLF en dos archivos de pruebas.
 
 ## Límites del cierre
 
