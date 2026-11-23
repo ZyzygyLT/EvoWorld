@@ -6,7 +6,6 @@ import sqlite3
 
 import pytest
 
-from tools.diagnose_worlds_db import main as _unused  # noqa: F401
 from tools.export_historical_archive import (
     ArchiveExportError,
     build_archive,
