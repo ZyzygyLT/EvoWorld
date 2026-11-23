@@ -54,6 +54,26 @@ function validateWorldState(state, label) {
             throw new Error(`Formato inválido: ${key} no es una lista en ${label}.`);
         }
     }
+    for (const beast of state.beasts ?? []) {
+        if (!beast || typeof beast.name !== 'string' ||
+            !isInteger(beast.x) || !isInteger(beast.y) ||
+            beast.x < 0 || beast.x >= width || beast.y < 0 || beast.y >= height ||
+            typeof beast.alive !== 'boolean') {
+            throw new Error(`Formato inválido: bestia fuera del mapa o incompleta en ${label}.`);
+        }
+    }
+    for (const war of state.wars ?? []) {
+        if (!war || typeof war.a !== 'string' || typeof war.b !== 'string' ||
+            (war.end_month != null && !isInteger(war.end_month))) {
+            throw new Error(`Formato inválido: guerra incompleta en ${label}.`);
+        }
+    }
+    for (const event of state.chronicle ?? []) {
+        if (!event || !isInteger(event.month) ||
+            typeof event.type !== 'string' || typeof event.text !== 'string') {
+            throw new Error(`Formato inválido: evento de crónica incompleto en ${label}.`);
+        }
+    }
     if (state.influence !== undefined) {
         validateMatrix(state.influence, width, height, `${label}.influence`);
     }
