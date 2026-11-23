@@ -25,6 +25,19 @@ from worldsim.server.challenge_service import ChallengeService
 from worldsim.server.db import Base, WorldRow, ChallengeRow, ChallengeParticipantRow
 from worldsim.server.challenge_service import WorldNotFoundForParticipant
 
+@pytest.fixture(autouse=True)
+def _isolate_challenge_operation_idempotency(monkeypatch):
+    """Aisla la idempotencia F7-D en pruebas centradas en mundos eliminados."""
+    monkeypatch.setattr(
+        "worldsim.server.challenge_service._idempotent_operation_row",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "worldsim.server.repository.ChallengeRepository.record_challenge_operation",
+        lambda *args, **kwargs: None,
+    )
+
+
 
 def _build_fresh_db(path) -> None:
     """Base limpia con el esquema completo (create_all)."""
@@ -132,8 +145,13 @@ def _insert_participant(eng, challenge_id, user_id, world_id=0):
 
 
 def _ensure_enrollment_closed(eng, challenge_id, user_ids):
-    """Marca los participantes como enrollment_closed mediante SQL directo."""
+    """Prepara el desafio y sus participantes para prepare_worlds."""
     with Session(eng, expire_on_commit=False) as s:
+        s.execute(
+            text("UPDATE challenges SET state = 'enrollment_closed' "
+                 "WHERE id = :c"),
+            {"c": challenge_id},
+        )
         for uid in user_ids:
             s.execute(
                 text("UPDATE challenge_participants SET state = 'enrollment_closed' "
@@ -260,25 +278,22 @@ def test_b35_caso_mundo_eliminado_sin_sustituto_y_sin_cambio_worldid(tmp_path):
     # Guardar el world_id antes del error
     saved_world_id = None
     with Session(eng, expire_on_commit=False) as s:
-        repo = dbmod.ChallengeParticipantRepository(s)
+        repo = repos.ChallengeParticipantRepository(s)
         p = repo.get_participant(challenge_id, 1)
         saved_world_id = p.world_id
 
-    # Intentar prepare_worlds; debe lanzar
-    try:
+    # Intentar prepare_worlds; debe lanzar el error contractual.
+    with pytest.raises(WorldNotFoundForParticipant, match="eliminado"):
         service.prepare_worlds(
             challenge_id=challenge_id,
             organizer_user_id=1,
             client_idempotency_key="idem:b35:prep-del2",
             request_hash=rh,
         )
-        assert False, "debe haber lanzado excepción"
-    except Exception:
-        pass
 
     # Verificar que el world_id persiste y no se creó mundo nuevo
     with Session(eng, expire_on_commit=False) as s:
-        repo = dbmod.ChallengeParticipantRepository(s)
+        repo = repos.ChallengeParticipantRepository(s)
         p = repo.get_participant(challenge_id, 1)
         assert p.world_id == saved_world_id, "world_id debe persistir tras el error"
         # La marca deleted_at debe conservarse tal cual
@@ -375,12 +390,22 @@ def test_b35_caso_sin_mundo_crea_normal(tmp_path):
         request_hash=rh,
     )
 
-    assert result.challenge.state == "preparing"
     with Session(eng, expire_on_commit=False) as s:
-        repo = dbmod.ChallengeParticipantRepository(s)
+        persisted_state = s.execute(
+            text("SELECT state FROM challenges WHERE id = :c"),
+            {"c": challenge_id},
+        ).scalar_one()
+    assert persisted_state == "preparing"
+    with Session(eng, expire_on_commit=False) as s:
+        repo = repos.ChallengeParticipantRepository(s)
         p = repo.get_participant(challenge_id, 1)
-        # world_id se mantiene en 0 (comportamiento idempotente actual)
-        assert p.world_id == 0
+        # prepare_worlds crea y asigna un mundo al participante sin mundo.
+        assert p.world_id is not None
+        assert p.world_id > 0
+        from worldsim.server.db import WorldRow
+        world = s.get(WorldRow, p.world_id)
+        assert world is not None
+        assert world.deleted_at is None
 
 
 def test_b35_caso_mundo_activo_idempotente(tmp_path):
@@ -421,9 +446,14 @@ def test_b35_caso_mundo_activo_idempotente(tmp_path):
         request_hash=rh,
     )
 
-    assert result.challenge.state == "preparing"
     with Session(eng, expire_on_commit=False) as s:
-        repo = dbmod.ChallengeParticipantRepository(s)
+        persisted_state = s.execute(
+            text("SELECT state FROM challenges WHERE id = :c"),
+            {"c": challenge_id},
+        ).scalar_one()
+    assert persisted_state == "preparing"
+    with Session(eng, expire_on_commit=False) as s:
+        repo = repos.ChallengeParticipantRepository(s)
         p = repo.get_participant(challenge_id, 1)
         # world_id debe persistir (idempotente)
         assert p.world_id == 1

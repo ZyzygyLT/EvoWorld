@@ -1061,6 +1061,11 @@ class ChallengeService:
                 raise WorldNotFoundForParticipant(
                     f"Mundo {participant.world_id} no encontrado para participante {participant.user_id}"
                 )
+            if world_row.deleted_at is not None:
+                raise WorldNotFoundForParticipant(
+                    f"Mundo {participant.world_id} eliminado logicamente "
+                    f"para participante {participant.user_id}"
+                )
 
             # Reconstruir engine desde state_json
             state = json.loads(world_row.state_json or "{}")

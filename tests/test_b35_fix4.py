@@ -465,3 +465,52 @@ def test_b35_fix4_caso_F_start_challenge_id_positivo(tmp_path):
 
     p = _get_participant_direct(eng, challenge_id, 1)
     assert p.world_id == 1
+
+def test_complete_challenge_rechaza_mundo_eliminado_sin_procesarlo(
+    tmp_path, monkeypatch
+):
+    """Un mundo eliminado no ejecuta ticks ni persiste resultados al completar."""
+    eng = _fresh_engine(tmp_path, name="complete-deleted.db")
+    service = _make_service(eng)
+
+    challenge_id, rh = _insert_challenge_direct(
+        eng, challenge_id=1, state="running"
+    )
+    _insert_participant_direct(eng, challenge_id, user_id=1, world_id=1)
+
+    deleted_at = _now_dt().replace(tzinfo=None)
+    _insert_world_direct(eng, world_id=1, deleted_at=deleted_at)
+
+    def unexpected_rebuild(*args, **kwargs):
+        raise AssertionError("No debe reconstruirse el motor de un mundo eliminado")
+
+    monkeypatch.setattr(service, "_rebuild_engine_from_state", unexpected_rebuild)
+
+    with _patch_idempotent(), _patch_record_challenge_operation():
+        with pytest.raises(
+            WorldNotFoundForParticipant, match="eliminado logicamente"
+        ):
+            service.complete_challenge(
+                challenge_id=challenge_id,
+                organizer_user_id=1,
+                client_idempotency_key="idem:complete:deleted",
+                request_hash=rh,
+            )
+
+    with Session(eng, expire_on_commit=False) as session:
+        challenge = session.get(ChallengeRow, challenge_id)
+        participant = ChallengeParticipantRepository(session).get_participant(
+            challenge_id, 1
+        )
+        world = session.get(WorldRow, 1)
+
+        assert challenge.state == "running"
+        assert participant.result_json == "{}"
+        assert participant.result_status == "persisted"
+        assert participant.result_verified == 0
+        assert participant.state == "inscrito"
+        assert world.deleted_at == deleted_at
+        assert world.months_simulated == 0
+        assert world.state_json == "{}"
+
+    eng.dispose()

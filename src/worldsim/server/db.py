@@ -324,30 +324,51 @@ def _replace_empty_legacy_f7c_tables(conn) -> None:
 def ensure_schema(target_engine=None) -> None:
     """Create and explicitly migrate schema (DEC02; no import-time side effects).
 
-    Existing worlds are not rebuilt: the F7-C allocator is added in place.
-    Legacy F7-C tables are replaced only when every affected table is empty.
-    SQLite migration DDL and data changes are atomic.
+    Existing worlds are not rebuilt. Legacy F7-C tables are replaced only
+    when every affected table is empty. DDL and data changes are transactional
+    on SQLite and PostgreSQL.
     """
     target = target_engine or engine_db
     _configure_engine(target)
 
-    if target.dialect.name != "sqlite":
+    dialect = target.dialect.name
+    if dialect not in ("sqlite", "postgresql"):
         Base.metadata.create_all(target)
         return
 
     with target.begin() as conn:
-        conn.exec_driver_sql("BEGIN IMMEDIATE")
+        if dialect == "sqlite":
+            conn.exec_driver_sql("BEGIN IMMEDIATE")
+        else:
+            # Serialize schema inspection and migration across app instances.
+            conn.execute(text("SELECT pg_advisory_xact_lock(734821037)"))
 
         _replace_empty_legacy_f7c_tables(conn)
         Base.metadata.create_all(conn)
 
-        user_columns = {c["name"]: c for c in inspect(conn).get_columns("users")}
+        user_columns = {
+            c["name"]: c for c in inspect(conn).get_columns("users")
+        }
         if "is_admin" not in user_columns:
             conn.execute(text(
                 "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"
             ))
 
-        columns = {c["name"]: c for c in inspect(conn).get_columns("worlds")}
+        columns = {
+            c["name"]: c for c in inspect(conn).get_columns("worlds")
+        }
+        if "deleted_at" not in columns:
+            timestamp_type = (
+                "DATETIME" if dialect == "sqlite"
+                else "TIMESTAMP WITHOUT TIME ZONE"
+            )
+            conn.execute(text(
+                f"ALTER TABLE worlds ADD COLUMN deleted_at {timestamp_type}"
+            ))
+            columns = {
+                c["name"]: c for c in inspect(conn).get_columns("worlds")
+            }
+
         if "next_operation_sequence" not in columns:
             conn.execute(text(
                 "ALTER TABLE worlds ADD COLUMN "
@@ -356,9 +377,10 @@ def ensure_schema(target_engine=None) -> None:
         elif columns["next_operation_sequence"]["nullable"]:
             raise RuntimeError(
                 "worlds.next_operation_sequence exists but is nullable; "
-                "refusing an implicit SQLite table rebuild"
+                "refusing an implicit schema rebuild or constraint change"
             )
 
+        # Portable SQL. Never rewind a healthy counter.
         conn.execute(text(
             "UPDATE worlds SET next_operation_sequence = "
             "(SELECT COALESCE(MAX(operation_sequence), 0) + 1 "
@@ -370,8 +392,12 @@ def ensure_schema(target_engine=None) -> None:
             "WHERE world_operations.world_id = worlds.id)"
         ))
 
-        violations = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
-        if violations:
-            raise RuntimeError(
-                f"Foreign-key violations after schema migration: {violations[:10]}"
-            )
+        if dialect == "sqlite":
+            violations = conn.execute(
+                text("PRAGMA foreign_key_check")
+            ).fetchall()
+            if violations:
+                raise RuntimeError(
+                    "Foreign-key violations after schema migration: "
+                    f"{violations[:10]}"
+                )

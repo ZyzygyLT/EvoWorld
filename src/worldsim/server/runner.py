@@ -1039,7 +1039,7 @@ async def safe_delete_world(
     session_factory,
     registry: RunnerRegistry,
 ) -> None:
-    """Delete a world safely: close its runner BEFORE its data (DEC10, §8).
+    """Logically delete a world safely: close its runner before marking it deleted (DEC10, §8).
 
     Mandatory sequence:
 
@@ -1057,7 +1057,7 @@ async def safe_delete_world(
        registered (evidence, never a silent unregister) and leaves the
        persisted data untouched — the world stays recoverable (§8).
     4. Unregister the verified-closed runner.
-    5. Only then delete the persisted row, in a worker thread (the event
+    5. Only then set the row's ``deleted_at`` marker, in a worker thread (the event
        loop is never blocked).  The work is shielded AND reference-held:
        if the CALLER is cancelled, the delete still finishes in its thread,
        the guard stays marked until it completes (released by the work's
@@ -1070,11 +1070,11 @@ async def safe_delete_world(
     (row lookup/404 semantics are preserved for the caller).
 
     Raises:
-        WorldNotFoundError: the row is already gone (e.g. a simultaneous
+        WorldNotFoundError: the row does not exist (e.g. a simultaneous
             delete won the race before this caller reached the lock) — the
             HTTP layer maps it to the existing 404.
         BaseException: whatever ``close()`` recorded (incomplete close) or
-            the persisted delete raised — never swallowed and never
+            the logical-delete persistence raised — never swallowed and never
             translated into a success (§8; no new HTTP codes, §10).
         asyncio.CancelledError: this caller was cancelled; the observable
             state remains coherent (see step 5).
