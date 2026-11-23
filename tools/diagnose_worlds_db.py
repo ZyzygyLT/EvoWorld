@@ -206,7 +206,7 @@ def diagnose(db_path: str | Path) -> dict[str, Any]:
                 diagnostics["operation_integrity"]["duplicate_idempotency_groups"] = int(
                     conn.execute("SELECT COUNT(*) FROM (SELECT world_id,requesting_user_id,"
                                  "client_idempotency_key FROM world_operations GROUP BY world_id,"
-                                 "requesting_user_id,client_idempotency_key HAVING COUNT(*)>1"
+                                 "requesting_user_id,client_idempotency_key HAVING COUNT(*)>1)"
                                  ).fetchone()[0])
 
         if "world_events" in tables and "world_operations" in tables:
@@ -235,7 +235,7 @@ def diagnose(db_path: str | Path) -> dict[str, Any]:
                 diagnostics["operation_integrity"]["duplicate_challenge_idempotency_groups"] = int(
                     conn.execute("SELECT COUNT(*) FROM (SELECT challenge_id,actor_user_id,"
                                  "client_idempotency_key FROM challenge_operations GROUP BY "
-                                 "challenge_id,actor_user_id,client_idempotency_key HAVING COUNT(*)>1"
+                                 "challenge_id,actor_user_id,client_idempotency_key HAVING COUNT(*)>1)"
                                  ).fetchone()[0])
 
         for table, columns in STATE_ALLOWLIST.items():
