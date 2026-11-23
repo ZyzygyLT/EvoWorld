@@ -18,10 +18,12 @@ def make_db(path: Path) -> None:
         CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, pw_hash TEXT);
         CREATE TABLE worlds (id INTEGER PRIMARY KEY, deleted_at TEXT, next_operation_sequence INTEGER,
                              visibility TEXT, status TEXT);
+        CREATE TABLE schema_checks (state TEXT CHECK (state IN ('ok', 'bad')));
         CREATE TABLE world_operations (id INTEGER PRIMARY KEY, world_id INTEGER, operation_id TEXT,
             operation_sequence INTEGER, status TEXT, continuity_state TEXT,
             FOREIGN KEY(world_id) REFERENCES worlds(id));
-        CREATE TABLE world_events (id INTEGER PRIMARY KEY, world_id INTEGER, operation_sequence INTEGER);
+        CREATE TABLE world_events (world_id INTEGER, operation_sequence INTEGER,
+                                   PRIMARY KEY(world_id, operation_sequence)) WITHOUT ROWID;
         CREATE TABLE challenges (id INTEGER PRIMARY KEY, state TEXT);
         CREATE TABLE challenge_participants (id INTEGER PRIMARY KEY, challenge_id INTEGER,
             user_id INTEGER, world_id INTEGER, state TEXT,
@@ -36,6 +38,7 @@ def make_db(path: Path) -> None:
     conn.execute("INSERT INTO users VALUES (1, 'private-user', 'secret-hash')")
     conn.execute("INSERT INTO worlds VALUES (1, NULL, 2, 'private', 'active')")
     conn.execute("INSERT INTO world_operations VALUES (1, 1, 'op-a', 1, 'confirmed', 'active')")
+    conn.execute("INSERT INTO world_events VALUES (1, 2)")
     conn.execute("INSERT INTO challenges VALUES (1, 'draft')")
     # Deliberately seed invalid historical references to verify detection.
     conn.execute("INSERT INTO challenge_participants VALUES (1, 1, 1, 0, 'inscrito')")
@@ -65,6 +68,9 @@ def test_diagnosis_reports_schema_and_counts(tmp_path: Path) -> None:
     report = module.diagnose(db)
     assert report["inventory"]["row_counts"]["worlds"] == 1
     assert "trg_worlds_noop" in report["inventory"]["triggers"]
+    assert "CHECK" in report["inventory"]["schema_sql"]["schema_checks"]
+    assert report["diagnostics"]["field_presence"]["world_operations"]["requesting_user_id"] is False
+    assert report["diagnostics"]["operation_integrity"]["events_without_matching_operation_rows"] == 1
     assert report["diagnostics"]["field_presence"]["worlds"]["deleted_at"] is True
     assert report["sqlite"]["integrity_check"] == ["ok"]
 
