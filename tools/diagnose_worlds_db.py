@@ -163,7 +163,7 @@ def diagnose(db_path: str | Path) -> dict[str, Any]:
                 if all(_has(cols, c) for c in ("challenge_id", "user_id")):
                     diagnostics["challenge_participants"]["duplicate_challenge_user_groups"] = int(
                         conn.execute(f"SELECT COUNT(*) FROM (SELECT challenge_id,user_id FROM {q} "
-                                     "GROUP BY challenge_id,user_id HAVING COUNT(*)>1").fetchone()[0])
+                                     "GROUP BY challenge_id,user_id HAVING COUNT(*)>1)").fetchone()[0])
                 if "worlds" in tables:
                     diagnostics["challenge_participants"]["orphan_world_id_rows"] = int(
                         conn.execute(f"SELECT COUNT(*) FROM {q} p LEFT JOIN worlds w ON w.id=p.world_id "
