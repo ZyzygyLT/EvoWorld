@@ -59,6 +59,20 @@ test('validates and adapts a historical package without inventing state', () => 
     assert.equal(adapted.state.world.width, 2);
 });
 
+test('accepts legacy maps without elevation and preserves absence', () => {
+    const archive = makeArchive();
+    delete archive.sources[0].worlds[0].state.world.elevation;
+    const [entry] = validateHistoricalArchive(archive);
+    const adapted = adaptHistoricalWorld(entry);
+    assert.equal('elevation' in adapted.state.world, false);
+});
+
+test('rejects malformed elevation when supplied', () => {
+    const archive = makeArchive();
+    archive.sources[0].worlds[0].state.world.elevation = [1];
+    assert.throws(() => validateHistoricalArchive(archive), /elevación/);
+});
+
 test('rejects unsupported package versions', () => {
     const archive = makeArchive();
     archive.format_version = 99;
