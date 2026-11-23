@@ -26,8 +26,11 @@ function validateWorldState(state, label) {
     }
     validateMatrix(world.biome, width, height, `${label}.world.biome`);
     validateMatrix(world.rivers, width, height, `${label}.world.rivers`);
-    if (!Array.isArray(world.elevation) || world.elevation.length !== width * height ||
-        world.elevation.some(value => !Number.isFinite(value))) {
+    // Legacy snapshots can omit elevation; WorldMap renders a neutral fallback.
+    // If the field is present, it must still be a complete finite numeric array.
+    if (world.elevation !== undefined && world.elevation !== null &&
+        (!Array.isArray(world.elevation) || world.elevation.length !== width * height ||
+            world.elevation.some(value => !Number.isFinite(value)))) {
         throw new Error(`Formato inválido: elevación no válida en ${label}.`);
     }
 
