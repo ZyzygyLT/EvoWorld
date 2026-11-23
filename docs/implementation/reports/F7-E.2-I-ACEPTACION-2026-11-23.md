@@ -36,4 +36,4 @@ El warning corresponde a la deprecación de la integración `httpx` con `starlet
 
 Esta aceptación corresponde a F7-E.2-I. No declara cerrada la totalidad de F7-E ni autoriza F7-F.
 
-No se realizó commit, push ni merge.
+La implementación se publicó en `feature/f7e-logical-delete` y se abrió el PR #3. No se realizó merge.
