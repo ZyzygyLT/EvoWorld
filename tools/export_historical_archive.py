@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -71,7 +72,7 @@ def _validate_state(raw: str, *, source: str, world_id: int) -> dict:
     if elevation is not None and (
         not isinstance(elevation, list) or len(elevation) != width * height
         or any(not isinstance(value, (int, float)) or isinstance(value, bool)
-               for value in elevation)
+               or not math.isfinite(value) for value in elevation)
     ):
         raise ArchiveExportError(
             f"{source}: world {world_id} has invalid world.elevation"
