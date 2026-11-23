@@ -37,7 +37,6 @@ def _build_pre_f7c_db(path) -> None:
             visibility VARCHAR(7) DEFAULT 'private'
                 CHECK (visibility IN ('private','public')),
             deleted_at DATETIME,
-            PRIMARY KEY (id),
             FOREIGN KEY(owner_user_id) REFERENCES users(id)
         );
         INSERT INTO worlds (
