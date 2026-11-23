@@ -236,12 +236,17 @@ class F7CEnv:
         checkpoint is seeded too, so coverage sees the atomic T2 evidence.
         """
         import uuid
+        import hashlib
 
         from sqlalchemy import text
 
         from worldsim.server.db import WorldOperation
 
         op_id = operation_id or str(uuid.uuid4())
+        if request_hash is None:
+            request_hash = hashlib.sha256(
+                f"f7c-seed:{world_id}:{sequence}:{op_id}".encode("utf-8")
+            ).hexdigest()
         with self.Session() as s:
             cp_id = None
             if with_checkpoint and status == "confirmed":

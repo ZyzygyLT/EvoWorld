@@ -96,6 +96,7 @@ class UserRow(Base):
     username = Column(String, unique=True, index=True)
     pw_hash = Column(String)  # pbkdf2-sha256(salt, password), hex
     created_at = Column(String)
+    is_admin = Column(Integer, nullable=False, default=0, server_default="0")
 
 
 class SessionRow(Base):
@@ -335,6 +336,11 @@ def ensure_schema(target_engine=None) -> None:
         return
 
     with target.begin() as conn:
+        user_columns = {c["name"]: c for c in inspect(conn).get_columns("users")}
+        if "is_admin" not in user_columns:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"
+            ))
         columns = {c["name"]: c for c in inspect(conn).get_columns("worlds")}
         if "next_operation_sequence" not in columns:
             conn.execute(text("ALTER TABLE worlds ADD COLUMN next_operation_sequence INTEGER NOT NULL DEFAULT 1"))
