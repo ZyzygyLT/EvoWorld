@@ -65,10 +65,16 @@ def _validate_state(raw: str, *, source: str, world_id: int) -> dict:
                 f"{source}: world {world_id} has invalid world.{key} dimensions"
             )
 
+    # Legacy snapshots may not contain elevation. The renderer supports a
+    # neutral terrain fallback; never synthesize values into the source state.
     elevation = world.get("elevation")
-    if not isinstance(elevation, list) or len(elevation) != width * height:
+    if elevation is not None and (
+        not isinstance(elevation, list) or len(elevation) != width * height
+        or any(not isinstance(value, (int, float)) or isinstance(value, bool)
+               for value in elevation)
+    ):
         raise ArchiveExportError(
-            f"{source}: world {world_id} has invalid world.elevation length"
+            f"{source}: world {world_id} has invalid world.elevation"
         )
 
     kingdoms = state.get("kingdoms")
