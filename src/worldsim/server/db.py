@@ -348,6 +348,12 @@ def ensure_schema(target_engine=None) -> None:
             ))
 
         columns = {c["name"]: c for c in inspect(conn).get_columns("worlds")}
+        if "deleted_at" not in columns:
+            conn.execute(text(
+                "ALTER TABLE worlds ADD COLUMN deleted_at DATETIME"
+            ))
+            columns = {c["name"]: c for c in inspect(conn).get_columns("worlds")}
+
         if "next_operation_sequence" not in columns:
             conn.execute(text(
                 "ALTER TABLE worlds ADD COLUMN "

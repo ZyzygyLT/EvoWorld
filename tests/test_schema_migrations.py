@@ -38,7 +38,6 @@ def _build_pre_f7c_db(path) -> None:
             checkpoint_version INTEGER,
             visibility VARCHAR(7) DEFAULT 'private'
                 CHECK (visibility IN ('private','public')),
-            deleted_at DATETIME,
             FOREIGN KEY(owner_user_id) REFERENCES users(id)
         );
         INSERT INTO worlds (
@@ -145,7 +144,7 @@ def test_migration_is_idempotent(migrated):
 
     with migrated.connect() as conn:
         before = conn.execute(text(
-            "SELECT id, name, next_operation_sequence FROM worlds ORDER BY id"
+            "SELECT id, name, next_operation_sequence, deleted_at FROM worlds ORDER BY id"
         )).fetchall()
         ddl_before = {
             table: conn.execute(text(
@@ -156,7 +155,7 @@ def test_migration_is_idempotent(migrated):
     dbmod.ensure_schema(migrated)
     with migrated.connect() as conn:
         after = conn.execute(text(
-            "SELECT id, name, next_operation_sequence FROM worlds ORDER BY id"
+            "SELECT id, name, next_operation_sequence, deleted_at FROM worlds ORDER BY id"
         )).fetchall()
         ddl_after = {
             table: conn.execute(text(
@@ -175,6 +174,9 @@ def test_migration_preserves_worlds_and_checkpoint_schema(migrated):
         )).scalar_one()
         assert "visibility" in world_ddl
         assert "deleted_at" in world_ddl
+        assert conn.execute(
+            text("SELECT deleted_at FROM worlds WHERE id=1")
+        ).scalar_one() is None
         assert "ix_worlds_seed" in {
             row[1] for row in conn.execute(text("PRAGMA index_list(worlds)"))
         }

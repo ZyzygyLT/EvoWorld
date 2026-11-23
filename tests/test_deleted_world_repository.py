@@ -63,11 +63,6 @@ def repo_session_factory(tmp_path):
     """
     engine = create_engine(f"sqlite:///{tmp_path / 'b31_repository.db'}")
     Base.metadata.create_all(engine)
-    with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE worlds ADD COLUMN last_checkpoint_at TEXT"))
-        conn.execute(
-            text("ALTER TABLE worlds ADD COLUMN checkpoint_count INTEGER DEFAULT 0")
-        )
     return sessionmaker(bind=engine)
 
 
