@@ -757,7 +757,7 @@ async def delete_world(
                     raise HTTPException(404, f"world {world_id} not found")
                 raise HTTPException(403, "only the owner may delete this world")
     # DEC10 (Etapa 2): close the runner, verify the close, unregister it,
-    # and ONLY THEN persist ``deleted_at`` (see safe_delete_world).
+    # and ONLY THEN persist the logical deletion (see safe_delete_world).
     # A failed close / failed persistence propagates as-is (existing error
     # contract — no new HTTP codes); a missing row maps to the existing 404.
     try:

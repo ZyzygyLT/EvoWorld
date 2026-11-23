@@ -482,3 +482,251 @@ def test_migration_failure_rolls_back_and_retry_succeeds(tmp_path, fragment):
         assert conn.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
 
     retry_engine.dispose()
+
+
+@pytest.fixture
+def postgres_legacy_engine():
+    """Disposable PostgreSQL schema; requires EVOWORLD_TEST_POSTGRES_URL."""
+    import os
+    import uuid
+
+    database_url = os.environ.get("EVOWORLD_TEST_POSTGRES_URL")
+    if not database_url:
+        pytest.skip("EVOWORLD_TEST_POSTGRES_URL is not configured")
+
+    pytest.importorskip("psycopg")
+
+    import worldsim.server.db as dbmod
+
+    schema = f"evoworld_migration_{uuid.uuid4().hex}"
+    admin_engine = create_engine(database_url)
+    with admin_engine.begin() as conn:
+        conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+
+    engine = create_engine(
+        database_url,
+        connect_args={"options": f"-csearch_path={schema}"},
+    )
+
+    try:
+        # Start from the current schema, then downgrade only the columns
+        # introduced by migrations under test.
+        dbmod.Base.metadata.create_all(engine)
+
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users DROP COLUMN is_admin"))
+            conn.execute(text("ALTER TABLE worlds DROP COLUMN deleted_at"))
+            conn.execute(text(
+                "ALTER TABLE worlds DROP COLUMN next_operation_sequence"
+            ))
+
+            # Recreate the three old F7-C tables in their inspected legacy shape.
+            conn.execute(text('DROP TABLE "world_events"'))
+            conn.execute(text('DROP TABLE "operation_resolutions"'))
+            conn.execute(text('DROP TABLE "world_operations"'))
+
+            conn.execute(text("""
+                CREATE TABLE world_operations (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    world_id INTEGER NOT NULL,
+                    operation_sequence INTEGER NOT NULL,
+                    status VARCHAR NOT NULL,
+                    continuity_state VARCHAR NOT NULL,
+                    created_at VARCHAR NOT NULL,
+                    requesting_user_id INTEGER NOT NULL,
+                    client_idempotency_key VARCHAR NOT NULL,
+                    request_hash VARCHAR NOT NULL,
+                    engine_version VARCHAR,
+                    checkpoint_id INTEGER NOT NULL
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE world_events (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    world_id INTEGER NOT NULL,
+                    operation_sequence INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    month INTEGER NOT NULL,
+                    event_type VARCHAR NOT NULL,
+                    event_text VARCHAR NOT NULL,
+                    kingdom_ids TEXT NOT NULL,
+                    event_params TEXT NOT NULL,
+                    msg_key VARCHAR NOT NULL,
+                    created_at VARCHAR NOT NULL
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE operation_resolutions (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    world_id INTEGER NOT NULL,
+                    operation_id VARCHAR NOT NULL,
+                    resolution VARCHAR NOT NULL,
+                    resolved_at VARCHAR NOT NULL,
+                    resolution_version INTEGER
+                )
+            """))
+
+        yield engine
+    finally:
+        engine.dispose()
+        with admin_engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin_engine.dispose()
+
+
+def test_postgresql_migrates_legacy_schema_and_is_idempotent(
+    postgres_legacy_engine,
+):
+    import worldsim.server.db as dbmod
+
+    engine = postgres_legacy_engine
+
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO users (id, username, pw_hash, created_at) "
+            "VALUES (7, 'legacy-admin', 'hash', '2026-01-01')"
+        ))
+        conn.execute(text(
+            "INSERT INTO worlds (id, name, status, checkpoint_count, visibility) "
+            "VALUES (1, 'legacy-world', 'running', 0, 'private')"
+        ))
+
+    dbmod.ensure_schema(engine)
+
+    with engine.connect() as conn:
+        user_columns = {
+            c["name"]: c for c in inspect(conn).get_columns("users")
+        }
+        world_columns = {
+            c["name"]: c for c in inspect(conn).get_columns("worlds")
+        }
+        operation_columns = {
+            c["name"] for c in inspect(conn).get_columns("world_operations")
+        }
+        resolution_columns = {
+            c["name"] for c in inspect(conn).get_columns("operation_resolutions")
+        }
+
+        assert "is_admin" in user_columns
+        assert user_columns["is_admin"]["nullable"] is False
+        assert "deleted_at" in world_columns
+        assert "next_operation_sequence" in world_columns
+        assert world_columns["next_operation_sequence"]["nullable"] is False
+        assert "payload_ref" in operation_columns
+        assert "admin_user_id" in resolution_columns
+        assert conn.execute(text(
+            "SELECT username FROM users WHERE id=7"
+        )).scalar_one() == "legacy-admin"
+        assert conn.execute(text(
+            "SELECT name, next_operation_sequence FROM worlds WHERE id=1"
+        )).one() == ("legacy-world", 1)
+
+    dbmod.ensure_schema(engine)
+
+    with engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT COUNT(*) FROM worlds"
+        )).scalar_one() == 1
+        assert conn.execute(text(
+            "SELECT next_operation_sequence FROM worlds WHERE id=1"
+        )).scalar_one() == 1
+
+
+def test_postgresql_refuses_legacy_f7c_history_and_rolls_back(
+    postgres_legacy_engine,
+):
+    import worldsim.server.db as dbmod
+
+    engine = postgres_legacy_engine
+
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO users (id, username, pw_hash, created_at) "
+            "VALUES (7, 'legacy-admin', 'hash', '2026-01-01')"
+        ))
+        conn.execute(text(
+            "INSERT INTO worlds (id, name, status, checkpoint_count, visibility) "
+            "VALUES (1, 'legacy-world', 'running', 0, 'private')"
+        ))
+        conn.execute(text("""
+            INSERT INTO world_operations (
+                id, world_id, operation_sequence, status, continuity_state,
+                created_at, requesting_user_id, client_idempotency_key,
+                request_hash, engine_version, checkpoint_id
+            ) VALUES (
+                1, 1, 1, 'confirmed', 'active', 't', 7, 'legacy-key',
+                'legacy-hash', '1.0', 1
+            )
+        """))
+
+    with pytest.raises(RuntimeError, match="historical rows exist"):
+        dbmod.ensure_schema(engine)
+
+    with engine.connect() as conn:
+        user_columns = {
+            c["name"] for c in inspect(conn).get_columns("users")
+        }
+        world_columns = {
+            c["name"] for c in inspect(conn).get_columns("worlds")
+        }
+        operation_columns = {
+            c["name"] for c in inspect(conn).get_columns("world_operations")
+        }
+
+        assert "is_admin" not in user_columns
+        assert "deleted_at" not in world_columns
+        assert "next_operation_sequence" not in world_columns
+        assert "payload_ref" not in operation_columns
+        assert conn.execute(text(
+            "SELECT request_hash FROM world_operations WHERE id=1"
+        )).scalar_one() == "legacy-hash"
+
+
+def test_postgresql_repairs_stale_counter_without_rewinding_healthy_one(
+    postgres_legacy_engine,
+):
+    import worldsim.server.db as dbmod
+
+    engine = postgres_legacy_engine
+    dbmod.ensure_schema(engine)
+
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO users (id, username, pw_hash, created_at) "
+            "VALUES (7, 'counter-user', 'hash', '2026-01-01')"
+        ))
+        conn.execute(text(
+            "INSERT INTO worlds (id, name, status, checkpoint_count, "
+            "visibility, next_operation_sequence) "
+            "VALUES (1, 'counter-world', 'running', 0, 'private', 1)"
+        ))
+        conn.execute(text("""
+            INSERT INTO world_operations (
+                id, world_id, operation_id, operation_sequence, status,
+                continuity_state, created_at, requesting_user_id,
+                client_idempotency_key, request_hash, recovery_generation
+            ) VALUES
+                (1, 1, 'op-4', 4, 'confirmed', 'active', 't', 7,
+                 'key-4', 'hash-4', 0),
+                (2, 1, 'op-6', 6, 'confirmed', 'active', 't', 7,
+                 'key-6', 'hash-6', 0)
+        """))
+
+    dbmod.ensure_schema(engine)
+
+    with engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT next_operation_sequence FROM worlds WHERE id=1"
+        )).scalar_one() == 7
+
+    with engine.begin() as conn:
+        conn.execute(text(
+            "UPDATE worlds SET next_operation_sequence=10 WHERE id=1"
+        ))
+
+    dbmod.ensure_schema(engine)
+
+    with engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT next_operation_sequence FROM worlds WHERE id=1"
+        )).scalar_one() == 10
