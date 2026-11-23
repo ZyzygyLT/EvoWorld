@@ -22,7 +22,7 @@ py tools/export_historical_archive.py `
   --out "$env:USERPROFILE\Documents\evoworld-historical-archive.json"
 ```
 
-El exportador abre el SQLite con `mode=ro`, ejecuta `integrity_check`, valida la estructura de los ocho estados y calcula SHA-256. Si cualquier fila no cumple el formato, cancela toda la exportación.
+El exportador abre el SQLite con `mode=ro`, ejecuta `integrity_check`, valida la estructura de los ocho estados y calcula SHA-256. Los mapas legacy sin `world.elevation` son compatibles: el visor usa su representación neutral, sin generar datos de elevación. Si cualquier fila no cumple el formato, cancela toda la exportación.
 
 El JSON resultante contiene datos históricos. Mantenerlo fuera del repositorio y no subirlo a GitHub ni compartirlo públicamente.
 
