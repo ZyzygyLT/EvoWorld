@@ -240,6 +240,7 @@ class WorldCheckpoint(Base):
     __table_args__ = (
         UniqueConstraint("world_id", "sequence", name="uq_world_checkpoint_seq"),
         ForeignKeyConstraint(["world_id"], ["worlds.id"], ondelete="CASCADE"),
+        Index("ix_world_checkpoints_world_id", "world_id"),
         Index("ix_world_checkpoints_world_month", "world_id", "month"),
     )
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -272,9 +273,9 @@ logger = None  # type: ignore
 
 _F7C_TABLES = ("world_operations", "world_events", "operation_resolutions")
 _F7C_REQUIRED_COLUMNS = {
-    "world_operations": {"operation_id", "operation_sequence", "confirmed_at", "payload_ref", "rng_state_ref", "recovery_state", "initial_checkpoint_id", "recovery_attempt_id", "recovery_generation"},
-    "world_events": {"operation_id", "operation_sequence", "position"},
-    "operation_resolutions": {"operation_id", "operation_sequence", "admin_user_id", "resolution_type", "reason", "evidence_refs", "idempotency_key"},
+    "world_operations": {"world_id", "operation_id", "operation_sequence", "status", "continuity_state", "created_at", "confirmed_at", "requesting_user_id", "client_idempotency_key", "request_hash", "engine_version", "checkpoint_id", "payload_ref", "rng_state_ref", "recovery_state", "initial_checkpoint_id", "recovery_attempt_id", "recovery_generation"},
+    "world_events": {"world_id", "operation_id", "operation_sequence", "position", "month", "event_type", "event_text", "kingdom_ids", "event_params", "msg_key", "created_at"},
+    "operation_resolutions": {"world_id", "operation_id", "operation_sequence", "admin_user_id", "resolution_type", "reason", "evidence_refs", "resolution_version", "created_at", "idempotency_key"},
 }
 
 
