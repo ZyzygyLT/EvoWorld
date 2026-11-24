@@ -1516,3 +1516,54 @@ Registro durable de operaciones globales de desafío (procedencia exigida por §
 - **Estado:** Aprobada / Contrato definido (F7-D-R1-B); implementación no iniciada.
 - **Origen:** F7-D-R1-B corrección contractual (2026-11-17).
 
+
+ 
+## 18. Galería pública con mundos destacados (F7-E.4 / DEC-F7E-01)
+
+### 18.1 Alcance y proyección pública
+
+- La galería pública solo consulta mundos con visibility=public y deleted_at IS NULL.
+- La proyección pública añade is_highlighted, booleano derivado de la existencia de un registro de destacado activo y vigente. No es una columna persistida de WorldRow.
+- La ficha pública equivalente servida por HTTP y el mensaje público de ficha por WS pueden incluir el mismo booleano. Esto no amplía permisos, suscripciones ni acceso a estado vivo; se mantienen las reglas de DEC20 para visitantes y propietarios.
+- El campo no incluye ni permite inferir mediante la respuesta el ID del destacado, su fecha de concesión, el administrador que lo concedió ni otros metadatos internos.
+- Las proyecciones privadas de mine=1 mantienen el contrato F7-B existente y no incorporan is_highlighted por esta decisión.
+- El destacado nunca cambia visibility, no convierte un mundo privado en público y no concede permisos adicionales.
+
+### 18.2 Determinación de vigencia
+
+- is_highlighted=true únicamente si existe un destacado activo cuya expires_at sea posterior al instante de evaluación, o no tenga expiración cuando el contrato de F7-E.1 lo permita.
+- Un destacado retirado o vencido produce is_highlighted=false y no otorga prioridad.
+- La retirada y la expiración conservan el registro histórico. Se preservan las reglas de retención de F7-E.1 y la eliminación lógica de F7-E.2-I.
+- La elegibilidad, la validación no destructiva del checkpoint y la autoridad para conceder o retirar siguen siendo las de F7-E.3; este contrato no las redefine.
+
+### 18.3 Orden y cursor compuesto
+
+- Orden total: is_highlighted DESC, id DESC.
+- El cursor es opaco y versionado. Su contenido lógico representa la pareja (is_highlighted, id) de la última fila emitida; el cliente no construye ni interpreta esa estructura.
+- El servidor valida versión, tipos, integridad/formato y compatibilidad del cursor con los filtros de consulta. Un cursor inválido o incompatible se rechaza con HTTP 400.
+- La página siguiente continúa por ID descendente dentro del grupo destacado correspondiente y, agotado ese grupo, continúa por el grupo no destacado en ID descendente.
+- Los filtros mine, search y mode forman parte del contexto de consulta. Cambiar cualquiera de ellos exige reiniciar la paginación; no se reutiliza el cursor anterior. Se conservan los límites de página de F7-B.
+- Cada página calcula la condición de destacado vigente en el momento de la consulta. No hay snapshot transaccional entre páginas: una concesión, retirada o expiración concurrente puede cambiar el orden y causar duplicados o saltos. El cliente debe reiniciar la consulta para obtener una vista coherente.
+
+### 18.4 Privacidad y compatibilidad
+
+- Ningún mundo privado ni eliminado lógicamente aparece en la galería pública.
+- La condición de destacado no modifica la autorización HTTP ni WS, ni crea una suscripción al runner para visitantes.
+- Se mantiene la allowlist de DEC20, ampliada únicamente con el booleano is_highlighted para las proyecciones públicas. No se exponen state_json, owner_user_id, identidad del administrador ni datos operativos internos.
+- El contrato no introduce rankings globales ni modifica el orden o las respuestas privadas de mine=1.
+
+### 18.5 Criterios de aceptación
+
+1. Ningún mundo privado aparece en la galería pública.
+2. Ningún mundo con deleted_at no nulo aparece en la galería pública.
+3. is_highlighted es siempre booleano en las proyecciones públicas y nunca contiene metadatos.
+4. Los destacados vencidos o retirados dejan de marcarse y de recibir prioridad.
+5. El orden es exactamente is_highlighted DESC, id DESC.
+6. La paginación atraviesa correctamente ambos grupos sin omitir la continuación lógica del cursor.
+7. Los cursores inválidos o incompatibles con filtros se rechazan con HTTP 400.
+8. Cambiar filtros obliga a reiniciar la paginación.
+9. La retirada/expiración conserva el historial.
+10. La condición de destacado no altera permisos HTTP/WS ni expone estado vivo adicional.
+11. Se mantienen autoridad y elegibilidad de F7-E.3.
+
+- **Estado:** contrato aprobado; implementación y pruebas pendientes.
