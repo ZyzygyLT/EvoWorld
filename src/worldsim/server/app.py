@@ -1785,10 +1785,15 @@ def api_challenge_results(
         if is_public_view:
             results = []
             for idx, p in enumerate(confirmed_sorted):
+                public_metrics = parse_metrics(p)
                 results.append({
                     "alias": p.public_alias or f"participant_{p.id}",
                     "state": p.state,
-                    "metrics": parse_metrics(p),
+                    "metrics": {
+                        key: public_metrics[key]
+                        for key in ("total_population", "wars_won", "tech_level", "influence_max")
+                        if key in public_metrics
+                    },
                     "result_verified": bool(p.result_verified),
                     "position": idx + 1,
                 })
