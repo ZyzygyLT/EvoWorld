@@ -122,12 +122,12 @@ Los registros de ejecución se conservan en:
 - Agregado: `tests/test_f7d_api_privacy.py`
 - Agregado: este informe.
 
-No se realizaron commits, pushes, merges ni cambios en otros worktrees.
+Los cambios de esta corrección se registraron en commits de la rama `fix/f7d-challenge-privacy` mediante la API de GitHub. No se realizó merge ni se modificaron otros worktrees.
 
 ## Dictamen
 
 La corrección original de privacidad de los cuatro endpoints tuvo cobertura específica
-aprobada (7/7). Esta revisión amplía la cobertura a ocho tests, pero requiere volver a ejecutar la suite específica. La regresión histórica ampliada no está completamente verde y
+aprobada (7/7); la versión ampliada previa obtuvo 8/8 antes del nuevo caso de allowlist. La revisión amplía la cobertura con un noveno test para la allowlist; la versión actual requiere ejecutar de nuevo la suite específica. La regresión histórica ampliada no está completamente verde y
 sus incompatibilidades quedan documentadas, sin ampliar el alcance de esta tarea.
 
 **Estado: allowlist de métricas públicas implementada; suite específica y validaciones estáticas pendientes de reejecución local. Regresión histórica amplia no verde por incompatibilidades documentadas.**
