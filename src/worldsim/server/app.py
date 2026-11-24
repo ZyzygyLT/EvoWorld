@@ -1799,6 +1799,7 @@ def api_challenge_results(
                     "world_id": p.world_id,
                     "state": p.state,
                     "result_json": p.result_json,
+                    "result_status": p.result_status,
                     "result_verified": bool(p.result_verified),
                 }
                 for p in participants
