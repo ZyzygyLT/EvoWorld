@@ -1454,18 +1454,14 @@ def api_create_challenge(
 
 
 @app.get("/api/challenges")
-def api_list_challenges(
-    authorization: str | None = Header(default=None),
-) -> dict:
+def api_list_challenges() -> dict:
     """Listar desafíos publicados (galería pública, DEC-F7D-09)."""
-    user = _auth_user(authorization)
     with db.SessionLocal() as db_:
         repo = ChallengeRepository(db_)
         challenges = repo.get_challenges_by_state("published")
     worlds = [
         {
             "id": c.id,
-            "organizer_user_id": c.organizer_user_id,
             "name": c.name,
             "rules_version": c.rules_version,
             "duration_ticks": c.duration_ticks,
@@ -1495,15 +1491,14 @@ def api_get_challenge(
             raise HTTPException(404, f"challenge {challenge_id} not found")
     return {
         "id": c.id,
-        "organizer_user_id": c.organizer_user_id,
         "name": c.name,
         "config_json": c.config_json,
         "rules_version": c.rules_version,
         "duration_ticks": c.duration_ticks,
         "state": c.state,
         "created_at": c.created_at,
-        "closed_at": c.closed_at,
-        "completed_at": c.completed_at,
+        "closed_at": getattr(c, "closed_at", None),
+        "completed_at": getattr(c, "completed_at", None),
     }
 
 
@@ -1603,26 +1598,49 @@ def api_list_participants(
     challenge_id: int,
     authorization: str | None = Header(default=None),
 ) -> dict:
-    """Listar participantes de un desafío."""
+    """Listar participantes según permisos del desafío."""
     user = _auth_user(authorization)
-    with db.SessionLocal() as db_:
-        repo = ChallengeParticipantRepository(db_)
-        participants = repo.get_participants(challenge_id)
-    worlds = [
-        {
-            "id": p.id,
-            "challenge_id": p.challenge_id,
-            "user_id": p.user_id,
-            "world_id": p.world_id,
-            "state": p.state,
-            "joined_at": p.joined_at,
-            "result_json": p.result_json,
-            "result_verified": bool(p.result_verified),
-        }
-        for p in participants
-    ]
-    return {"participants": worlds}
+    if user is None:
+        raise HTTPException(401, "authentication required")
 
+    with db.SessionLocal() as db_:
+        challenge_repo = ChallengeRepository(db_)
+        c = challenge_repo.get_challenge(challenge_id)
+        if c is None:
+            raise HTTPException(404, f"challenge {challenge_id} not found")
+
+        participant_repo = ChallengeParticipantRepository(db_)
+        is_organizer = user.id == c.organizer_user_id
+
+        is_admin = False
+        if not is_organizer:
+            db_user = db_.get(db.UserRow, user.id)
+            is_admin = db_user is not None and bool(db_user.is_admin)
+
+        if is_organizer or is_admin:
+            participants = participant_repo.get_participants(challenge_id)
+        else:
+            own_participant = participant_repo.get_participant(
+                challenge_id, user.id
+            )
+            if own_participant is None:
+                raise HTTPException(404, "challenge not found")
+            participants = [own_participant]
+
+        worlds = [
+            {
+                "id": p.id,
+                "challenge_id": p.challenge_id,
+                "user_id": p.user_id,
+                "world_id": p.world_id,
+                "state": p.state,
+                "result_json": p.result_json,
+                "result_verified": bool(p.result_verified),
+            }
+            for p in participants
+        ]
+
+    return {"participants": worlds}
 
 @app.put("/api/challenges/{challenge_id}/close-enrollment")
 def api_close_enrollment(
@@ -1691,110 +1709,107 @@ def api_challenge_results(
     challenge_id: int,
     authorization: str | None = Header(default=None),
 ) -> dict:
-    """Consultar resultados de un desafío con clasificación estadística y anonimización."""
+    """Consultar resultados respetando privacidad y permisos por rol."""
     user = _auth_user(authorization)
+
+    import json
+
     with db.SessionLocal() as db_:
         crepo = ChallengeRepository(db_)
         c = crepo.get_challenge(challenge_id)
-    if c is None:
-        raise HTTPException(404, f"challenge {challenge_id} not found")
-    
-    # Autorización básica
-    is_organizer = user is not None and user.id == c.organizer_user_id
-    is_public = c.state == "completed"
-    
-    if not is_public and not is_organizer:
-        raise HTTPException(404, f"challenge {challenge_id} not found")
-    
-    with db.SessionLocal() as db_:
-        prepo = ChallengeParticipantRepository(db_)
-        participants = prepo.get_participants(challenge_id)
-    
-    # Filtrar solo resultados confirmados para clasificación pública
-    confirmed_participants = [p for p in participants if p.result_status == "confirmed"]
+        if c is None:
+            raise HTTPException(404, f"challenge {challenge_id} not found")
 
-    # Obtener métrica principal
-    import json
-    config = {}
-    try:
-        config = json.loads(c.config_json)
-    except:
-        pass
-    primary_metric = config.get("primary_metric", "total_population")
-    
-    # Ordenar participantes
-    def sort_key(p):
-        try:
-            metrics = json.loads(p.result_json or "{}")
-        except:
-            metrics = {}
-        # Clave de ordenación: métrica principal desc, luego desempates
-        # Desempates: tech_level desc, wars_won desc, total_population desc, user_id asc
-        # Omitir repetición si métrica principal coincide con desempate
-        values = []
-        # Métrica principal
-        values.append(-metrics.get(primary_metric, 0))
-        # Desempates
-        for m in ["tech_level", "wars_won", "total_population"]:
-            if m != primary_metric:
-                values.append(-metrics.get(m, 0))
-        # user_id asc para estabilidad interna
-        values.append(p.user_id)
-        return tuple(values)
-    
-    # Ordenar solo confirmados
-    confirmed_sorted = sorted(confirmed_participants, key=sort_key)
-    
-    # Construir respuesta
-    results = []
-    for idx, p in enumerate(confirmed_sorted):
-        # Anonimización para respuestas públicas
-        if is_public and not is_organizer:
-            # Alias opaco persistente
-            alias = p.public_alias or f"participant_{p.id}"
-            results.append({
-                "alias": alias,
-                "state": p.state,
-                "metrics": json.loads(p.result_json or "{}"),
-                "result_verified": True,
-                "position": idx + 1,
-            })
+        is_public = c.state == "completed"
+        is_organizer = user is not None and user.id == c.organizer_user_id
+
+        is_admin = False
+        if user is not None and not is_organizer:
+            db_user = db_.get(db.UserRow, user.id)
+            is_admin = db_user is not None and bool(db_user.is_admin)
+
+        prepo = ChallengeParticipantRepository(db_)
+        own_participant = None
+        if user is not None and not is_organizer and not is_admin:
+            own_participant = prepo.get_participant(challenge_id, user.id)
+
+        # Organizador y administrador pueden consultar todas las filas.
+        if is_organizer or is_admin:
+            participants = prepo.get_participants(challenge_id)
+
+        # Un participante inscrito solo puede consultar su propia fila.
+        elif own_participant is not None:
+            participants = [own_participant]
+
+        # Un visitante o usuario ajeno solo puede consultar el ranking
+        # público cuando el desafío terminó.
+        elif is_public:
+            participants = prepo.get_participants(challenge_id)
+
         else:
-            # Organizador ve datos internos
-            results.append({
-                "user_id": p.user_id,
-                "world_id": p.world_id,
-                "state": p.state,
-                "result_json": p.result_json,
-                "result_verified": bool(p.result_verified),
-            })
-    
-    # Para no organizador, participantes no confirmados no se exponen
-    if is_public and not is_organizer:
-        return {
-            "challenge_id": challenge_id,
-            "state": c.state,
-            "primary_metric": primary_metric,
-            "participants": results,
-        }
-    
-    # Organizador ve todo
-    all_results = []
-    for p in participants:
-        all_results.append({
-            "user_id": p.user_id,
-            "world_id": p.world_id,
-            "state": p.state,
-            "result_json": p.result_json,
-            "result_verified": bool(p.result_verified),
-        })
+            raise HTTPException(404, f"challenge {challenge_id} not found")
+
+        config = {}
+        try:
+            config = json.loads(c.config_json or "{}")
+        except (TypeError, ValueError):
+            pass
+        primary_metric = config.get("primary_metric", "total_population")
+
+        def parse_metrics(participant):
+            try:
+                value = json.loads(participant.result_json or "{}")
+                return value if isinstance(value, dict) else {}
+            except (TypeError, ValueError):
+                return {}
+
+        def sort_key(participant):
+            metrics = parse_metrics(participant)
+            values = [-metrics.get(primary_metric, 0)]
+            for metric in ["tech_level", "wars_won", "total_population"]:
+                if metric != primary_metric:
+                    values.append(-metrics.get(metric, 0))
+            values.append(participant.user_id)
+            return tuple(values)
+
+        # Solo los resultados confirmados participan del ranking público.
+        confirmed_sorted = sorted(
+            [p for p in participants if p.result_status == "confirmed"],
+            key=sort_key,
+        )
+
+        # Visitantes y usuarios ajenos reciben exclusivamente el ranking
+        # anónimo, incluso si están autenticados.
+        is_public_view = not (is_organizer or is_admin or own_participant is not None)
+
+        if is_public_view:
+            results = []
+            for idx, p in enumerate(confirmed_sorted):
+                results.append({
+                    "alias": p.public_alias or f"participant_{p.id}",
+                    "state": p.state,
+                    "metrics": parse_metrics(p),
+                    "result_verified": bool(p.result_verified),
+                    "position": idx + 1,
+                })
+        else:
+            results = [
+                {
+                    "user_id": p.user_id,
+                    "world_id": p.world_id,
+                    "state": p.state,
+                    "result_json": p.result_json,
+                    "result_verified": bool(p.result_verified),
+                }
+                for p in participants
+            ]
+
     return {
         "challenge_id": challenge_id,
         "state": c.state,
         "primary_metric": primary_metric,
-        "participants": all_results,
+        "participants": results,
     }
-
 
 @app.put("/api/challenges/{challenge_id}/complete")
 def api_complete_challenge(
