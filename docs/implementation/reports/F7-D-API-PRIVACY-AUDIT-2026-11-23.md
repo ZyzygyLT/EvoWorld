@@ -3,7 +3,7 @@
 ## Estado
 
 Corrección de privacidad implementada en la rama `fix/f7d-challenge-privacy` y sometida a validación específica.
-El PR #4 permanece abierto y sin fusionar.
+El PR #4 fue fusionado en `feature/evoworld-review` el 2026-11-24.
 
 ## Alcance
 
@@ -122,7 +122,7 @@ Los registros de ejecución se conservan en:
 - Agregado: `tests/test_f7d_api_privacy.py`
 - Agregado: este informe.
 
-Los cambios de esta corrección se registraron en commits de la rama `fix/f7d-challenge-privacy` mediante la API de GitHub. No se realizó merge ni se modificaron otros worktrees.
+Los cambios de esta corrección se registraron en commits de la rama `fix/f7d-challenge-privacy` mediante la API de GitHub. El PR #4 se integró mediante merge commit `f80156813dc2027d1bfab0079042ad097dc2271b`. Esta actualización documental se realiza después del merge; no modifica código funcional ni otros worktrees.
 
 ## Dictamen
 
@@ -134,7 +134,7 @@ verde: registró 793 aprobados y 93 fallos, además de los resultados omitidos
 indicados; sus incompatibilidades quedan documentadas y no se atribuyen
 automáticamente a esta corrección.
 
-**Estado: corrección de privacidad y allowlist implementadas; suite específica y comprobaciones estáticas aprobadas. Regresión histórica amplia no verde por incompatibilidades documentadas.**
+**Estado: corrección de privacidad y allowlist implementadas y fusionadas en `feature/evoworld-review` mediante `f80156813dc2027d1bfab0079042ad097dc2271b`; suite específica y comprobaciones estáticas aprobadas. Regresión histórica amplia no verde por incompatibilidades documentadas.**
 
 ## Revisión adicional — resultados privados por participante
 
