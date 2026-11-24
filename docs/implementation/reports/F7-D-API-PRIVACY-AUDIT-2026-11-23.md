@@ -79,8 +79,7 @@ Validación ejecutada:
 - `python -m pytest -q tests/test_f7d_api_privacy.py`
 - Validación original antes de ampliar los casos: **7 passed, 1 warning**.
 - Esta revisión añade dos escenarios y deja la validación de la suite ampliada pendiente; no se afirma que los nuevos tests hayan sido ejecutados.
-- `python -m py_compile src/worldsim/server/app.py`: correcto.
-- `git -c core.whitespace=cr-at-eol diff --check`: correcto.
+- La compilación y `diff --check` se ejecutaron en la validación original; deben repetirse tras esta revisión.
 
 La advertencia corresponde a la integración `httpx`/Starlette TestClient y no
 representa un fallo de estos tests.
