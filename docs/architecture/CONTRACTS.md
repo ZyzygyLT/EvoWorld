@@ -1545,14 +1545,20 @@ Registro durable de operaciones globales de desafío (procedencia exigida por §
 - Los filtros mine, search y mode forman parte del contexto de consulta. Cambiar cualquiera de ellos exige reiniciar la paginación; no se reutiliza el cursor anterior. Se conservan los límites de página de F7-B.
 - Cada página calcula la condición de destacado vigente en el momento de la consulta. No hay snapshot transaccional entre páginas: una concesión, retirada o expiración concurrente puede cambiar el orden y causar duplicados o saltos. El cliente debe reiniciar la consulta para obtener una vista coherente.
 
-### 18.4 Privacidad y compatibilidad
+### 18.4 Resoluciones técnicas H1–H3
+
+- **H1 — Vinculación del cursor:** el contexto normalizado y versionado del cursor incluye `mine`, `search`, `mode` y `limit`. Cualquier cambio en uno de esos cuatro parámetros invalida el cursor y exige reiniciar la paginación, conforme a §15.2. La validación ocurre antes de ejecutar la consulta. El cursor no concede autorización ni sustituye los filtros SQL obligatorios.
+- **H2 — Concesión después de expiración:** la operación administrativa de concesión, dentro de una única transacción, revalida la elegibilidad del mundo y busca el registro anterior que siga `is_active=true` pero tenga `expires_at` vencido. Si existe, lo cambia a `is_active=false` y conserva íntegra esa fila histórica; después crea el nuevo registro. La transición y la inserción son atómicas, de modo que el índice único parcial no queda bloqueado por una fila expirada. La consulta de galería y cualquier GET no modifican registros ni limpian expiraciones. Un destacado aún vigente no se desactiva automáticamente para permitir una segunda concesión.
+- **H3 — Checkpoint elegible no destructivo:** consultar únicamente candidatos con `is_valid=true`, ordenados por `sequence DESC`. Verificar el SHA-256 directamente sobre los bytes del payload persistido y elegir el primer candidato cuyo checksum coincida. Si el candidato más reciente está corrupto, continuar con el siguiente candidato anterior; si ninguno pasa, el mundo no es elegible. La evaluación no actualiza `is_valid`, no persiste invalidaciones ni reparaciones, no avanza ni recupera el mundo y no reutiliza `CheckpointRepository.get_latest_valid_checkpoint()` ni `RecoveryManager.recover()`.
+
+### 18.5 Privacidad y compatibilidad
 
 - Ningún mundo privado ni eliminado lógicamente aparece en la galería pública.
 - La condición de destacado no modifica la autorización HTTP ni WS, ni crea una suscripción al runner para visitantes.
 - Se mantiene la allowlist de DEC20, ampliada únicamente con el booleano is_highlighted para las proyecciones públicas. No se exponen state_json, owner_user_id, identidad del administrador ni datos operativos internos.
 - El contrato no introduce rankings globales ni modifica el orden o las respuestas privadas de mine=1.
 
-### 18.5 Criterios de aceptación
+### 18.6 Criterios de aceptación
 
 1. Ningún mundo privado aparece en la galería pública.
 2. Ningún mundo con deleted_at no nulo aparece en la galería pública.
