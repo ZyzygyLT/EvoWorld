@@ -1566,10 +1566,12 @@ Registro durable de operaciones globales de desafío (procedencia exigida por §
 4. Los destacados vencidos o retirados dejan de marcarse y de recibir prioridad.
 5. El orden es exactamente is_highlighted DESC, id DESC.
 6. La paginación atraviesa correctamente ambos grupos sin omitir la continuación lógica del cursor.
-7. Los cursores inválidos o incompatibles con filtros se rechazan con HTTP 400.
-8. Cambiar filtros obliga a reiniciar la paginación.
-9. La retirada/expiración conserva el historial.
-10. La condición de destacado no altera permisos HTTP/WS ni expone estado vivo adicional.
-11. Se mantienen autoridad y elegibilidad de F7-E.3.
+7. Los cursores inválidos o incompatibles con `mine`, `search`, `mode` o `limit` se rechazan con HTTP 400.
+8. Cambiar cualquiera de esos cuatro parámetros obliga a reiniciar la paginación.
+9. La concesión posterior a la expiración desactiva atómicamente el registro vencido anterior, conserva su historial y no muta datos desde GET.
+10. La elegibilidad selecciona el checkpoint íntegro más reciente entre candidatos `is_valid=true`, sin mutar ni persistir cambios.
+11. La retirada/expiración conserva el historial.
+12. La condición de destacado no altera permisos HTTP/WS ni expone estado vivo adicional.
+13. Se mantienen autoridad y elegibilidad de F7-E.3.
 
 - **Estado:** contrato aprobado; implementación y pruebas pendientes.
