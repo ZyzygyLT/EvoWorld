@@ -2,8 +2,8 @@
 
 ## Estado
 
-Corrección de privacidad implementada localmente y validada mediante tests específicos.
-Pendiente de revisión final e integración. No se realizó commit ni push.
+Corrección de privacidad implementada en la rama `fix/f7d-challenge-privacy` y sometida a validación específica.
+El PR #4 permanece abierto y sin fusionar.
 
 ## Alcance
 
@@ -50,6 +50,7 @@ DEC20/DEC21, F7-C ni el alcance F7-D Level 2.
 - Visitantes y usuarios ajenos solo pueden consultar resultados cuando el desafío está `completed`.
 - La vista pública incluye exclusivamente filas con `result_status == "confirmed"`.
 - La vista pública utiliza alias, estado, métricas, verificación y posición.
+- Las métricas públicas se filtran mediante allowlist estricta: `total_population`, `wars_won`, `tech_level`, `influence_max`; otros campos presentes en `result_json` no se serializan.
 - No expone `user_id`, `world_id`, `result_json` ni `state_json`.
 - Usuarios ajenos autenticados reciben el mismo ranking anonimizado que visitantes anónimos.
 - `result_verified` refleja el valor almacenado, no un valor fijo.
@@ -73,24 +74,25 @@ Cobertura:
 6. Acceso de un participante a su resultado antes de completar el desafío.
 7. Acceso del participante a su resultado verificado antes de la confirmación pública.
 8. Acceso del organizador y administrador a todos los resultados.
+9. Filtrado estricto de métricas públicas ante campos internos adicionales en `result_json`.
 
 Validación ejecutada:
 
 - `python -m pytest -q tests/test_f7d_api_privacy.py`
 - Validación original antes de ampliar los casos: **7 passed, 1 warning**.
-- Esta revisión añade dos escenarios y deja la validación de la suite ampliada pendiente; no se afirma que los nuevos tests hayan sido ejecutados.
-- La compilación y `diff --check` se ejecutaron en la validación original; deben repetirse tras esta revisión.
+- La suite específica previamente ejecutada obtuvo **8 passed, 1 warning** antes de añadir el caso de allowlist; la nueva versión requiere reejecución local.
+- La compilación y `diff --check` deben repetirse tras esta revisión.
 
 La advertencia corresponde a la integración `httpx`/Starlette TestClient y no
 representa un fallo de estos tests.
 
 ## Limitaciones de la regresión histórica
 
-La ejecución de la regresión ampliada produjo:
+La ejecución más reciente de la regresión ampliada, excluyendo el archivo que no recopila por importar `_ensure_challenge_participants_constraints`, produjo:
 
-- 55 fallos.
-- 25 tests aprobados.
-- 1 warning.
+- 794 tests aprobados.
+- 92 fallos.
+- 8 skipped, 1 xfailed, 1 xpassed y 1 warning.
 
 Los fallos se concentran en incompatibilidades de los tests históricos con
 el esquema/modelos presentes en esta rama, entre ellas referencias a
@@ -128,8 +130,13 @@ La corrección original de privacidad de los cuatro endpoints tuvo cobertura esp
 aprobada (7/7). Esta revisión amplía la cobertura a ocho tests, pero requiere volver a ejecutar la suite específica. La regresión histórica ampliada no está completamente verde y
 sus incompatibilidades quedan documentadas, sin ampliar el alcance de esta tarea.
 
-**Estado: revisión de privacidad ampliada; suite específica pendiente de reejecución.**
+**Estado: allowlist de métricas públicas implementada; suite específica y validaciones estáticas pendientes de reejecución local. Regresión histórica amplia no verde por incompatibilidades documentadas.**
 
 ## Revisión adicional — resultados privados por participante
 
 La ruta ya seleccionaba la fila propia del participante antes de filtrar el ranking público; el filtro `confirmed` se aplica únicamente a la vista pública. La prueba anterior no representaba el ciclo real porque creaba un participante `confirmed` dentro de un desafío `running`. Se reemplazó por cobertura de una fila `persisted` sin resultado durante `running` y una fila `verified` en `completed` antes de la confirmación pública. La respuesta privada incluye ahora `result_status`, mientras que la vista pública sigue limitada a `confirmed`.
+
+
+## Corrección adicional — allowlist de métricas públicas
+
+La serialización del ranking público ya no devuelve el diccionario completo de `result_json`. Proyecta únicamente `total_population`, `wars_won`, `tech_level` e `influence_max`; los resultados privados del participante/organizador/admin mantienen su respuesta independiente. Se añadió un test que inyecta `internal_score` y `private_note` en el JSON persistido y exige que no aparezcan en el ranking. Esta corrección requiere ejecutar de nuevo la suite específica y las comprobaciones estáticas en el worktree local.
