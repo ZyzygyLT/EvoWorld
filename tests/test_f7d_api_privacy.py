@@ -38,20 +38,25 @@ def _challenge(env, organizer_id, state="published"):
 
 
 def _participant(env, challenge_id, user_id, world_id, *,
-                 status="confirmed", alias="Alias", population=100):
+                 status="confirmed", alias="Alias", population=100,
+                 result_verified=None):
     with env.Session() as session:
+        metrics = {} if population is None else {
+            "total_population": population,
+            "tech_level": 2,
+            "wars_won": 1,
+        }
         row = ChallengeParticipantRow(
             challenge_id=challenge_id,
             user_id=user_id,
             world_id=world_id,
             public_alias=alias,
-            result_json=json.dumps({
-                "total_population": population,
-                "tech_level": 2,
-                "wars_won": 1,
-            }),
+            result_json=json.dumps(metrics),
             result_status=status,
-            result_verified=1,
+            result_verified=(
+                int(status in ("verified", "confirmed"))
+                if result_verified is None else result_verified
+            ),
             state="activo",
         )
         session.add(row)
@@ -173,6 +178,10 @@ def test_public_results_are_anonymous_and_confirmed_only(f7c_api):
         env, challenge_id, 103, 83003,
         status="confirmed", alias="Public-C", population=200,
     )
+    _participant(
+        env, challenge_id, 104, 83004,
+        status="verified", alias="Verified-D", population=600,
+    )
 
     response = client.get(f"/api/challenges/{challenge_id}/results")
     assert response.status_code == 200, response.text
@@ -197,15 +206,18 @@ def test_public_results_are_anonymous_and_confirmed_only(f7c_api):
         assert forbidden.isdisjoint(row)
 
 
-def test_participant_can_view_own_result_before_completion(f7c_api):
+def test_participant_can_view_own_pending_row_before_completion(f7c_api):
     client, env = f7c_api
     owner_headers, owner_id = _register(client, "ownresultowner")
     participant_headers, participant_id = _register(client, "ownresultuser")
     _, other_id = _register(client, "ownresultother")
 
     challenge_id = _challenge(env, owner_id, "running")
-    _participant(env, challenge_id, participant_id, 84001)
-    _participant(env, challenge_id, other_id, 84002)
+    _participant(
+        env, challenge_id, participant_id, 84001,
+        status="persisted", population=None, result_verified=0,
+    )
+    _participant(env, challenge_id, other_id, 84002, status="persisted")
 
     response = client.get(
         f"/api/challenges/{challenge_id}/results",
@@ -215,6 +227,9 @@ def test_participant_can_view_own_result_before_completion(f7c_api):
     rows = response.json()["participants"]
     assert len(rows) == 1
     assert rows[0]["user_id"] == participant_id
+    assert rows[0]["result_status"] == "persisted"
+    assert rows[0]["result_json"] == "{}"
+    assert rows[0]["result_verified"] is False
     assert "state_json" not in rows[0]
 
     outsider_headers, _ = _register(client, "ownresultoutsider")
@@ -222,6 +237,46 @@ def test_participant_can_view_own_result_before_completion(f7c_api):
         f"/api/challenges/{challenge_id}/results",
         headers=outsider_headers,
     ).status_code == 404
+
+
+def test_participant_can_view_own_verified_result_before_public_confirmation(f7c_api):
+    client, env = f7c_api
+    _, owner_id = _register(client, "verifiedowner")
+    participant_headers, participant_id = _register(client, "verifieduser")
+    _, other_id = _register(client, "verifiedother")
+
+    challenge_id = _challenge(env, owner_id, "completed")
+    _participant(
+        env, challenge_id, participant_id, 84101,
+        status="verified", alias="Private-Verified", population=450,
+    )
+    _participant(
+        env, challenge_id, other_id, 84102,
+        status="verified", alias="Other-Verified", population=700,
+    )
+
+    own_response = client.get(
+        f"/api/challenges/{challenge_id}/results",
+        headers=participant_headers,
+    )
+    assert own_response.status_code == 200, own_response.text
+    own_rows = own_response.json()["participants"]
+    assert len(own_rows) == 1
+    assert own_rows[0]["user_id"] == participant_id
+    assert own_rows[0]["result_status"] == "verified"
+    assert json.loads(own_rows[0]["result_json"])["total_population"] == 450
+
+    public_response = client.get(f"/api/challenges/{challenge_id}/results")
+    assert public_response.status_code == 200, public_response.text
+    assert public_response.json()["participants"] == []
+
+    outsider_headers, _ = _register(client, "verifiedoutsider")
+    outsider_response = client.get(
+        f"/api/challenges/{challenge_id}/results",
+        headers=outsider_headers,
+    )
+    assert outsider_response.status_code == 200, outsider_response.text
+    assert outsider_response.json()["participants"] == []
 
 
 def test_admin_and_organizer_can_view_all_results(f7c_api):
