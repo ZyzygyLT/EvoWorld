@@ -193,6 +193,31 @@ def test_public_results_are_anonymous_and_confirmed_only(f7c_api):
     forbidden = {"user_id", "world_id", "result_json", "state_json"}
     for row in rows:
         assert forbidden.isdisjoint(row)
+        assert set(row["metrics"]) <= {
+            "total_population", "wars_won", "tech_level", "influence_max"
+        }
+
+    # El JSON persistido puede contener campos internos o añadidos en el futuro;
+    # la respuesta pública debe mantener una allowlist estricta.
+    with env.Session() as session:
+        participant = session.query(ChallengeParticipantRow).filter_by(
+            challenge_id=challenge_id, public_alias="Public-A"
+        ).one()
+        persisted_metrics = json.loads(participant.result_json)
+        persisted_metrics["internal_score"] = 999
+        persisted_metrics["private_note"] = "must-not-leak"
+        participant.result_json = json.dumps(persisted_metrics)
+        session.commit()
+
+    filtered_response = client.get(f"/api/challenges/{challenge_id}/results")
+    assert filtered_response.status_code == 200, filtered_response.text
+    public_a = next(
+        row for row in filtered_response.json()["participants"]
+        if row["alias"] == "Public-A"
+    )
+    assert public_a["metrics"] == {
+        "total_population": 300, "tech_level": 2, "wars_won": 1
+    }
 
     outsider_headers, _ = _register(client, "resultoutsider")
     outsider_response = client.get(
