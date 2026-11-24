@@ -71,12 +71,14 @@ Cobertura:
 4. Acceso administrativo basado en el rol persistido.
 5. Resultados públicos anónimos y solo confirmados.
 6. Acceso de un participante a su resultado antes de completar el desafío.
-7. Acceso del organizador y administrador a todos los resultados.
+7. Acceso del participante a su resultado verificado antes de la confirmación pública.
+8. Acceso del organizador y administrador a todos los resultados.
 
 Validación ejecutada:
 
 - `python -m pytest -q tests/test_f7d_api_privacy.py`
-- Resultado: **7 passed, 1 warning**.
+- Validación original antes de ampliar los casos: **7 passed, 1 warning**.
+- Esta revisión añade dos escenarios y deja la validación de la suite ampliada pendiente; no se afirma que los nuevos tests hayan sido ejecutados.
 - `python -m py_compile src/worldsim/server/app.py`: correcto.
 - `git -c core.whitespace=cr-at-eol diff --check`: correcto.
 
@@ -123,8 +125,12 @@ No se realizaron commits, pushes, merges ni cambios en otros worktrees.
 
 ## Dictamen
 
-La corrección de privacidad de los cuatro endpoints tiene cobertura específica
-aprobada (7/7). La regresión histórica ampliada no está completamente verde y
+La corrección original de privacidad de los cuatro endpoints tuvo cobertura específica
+aprobada (7/7). Esta revisión amplía la cobertura a ocho tests, pero requiere volver a ejecutar la suite específica. La regresión histórica ampliada no está completamente verde y
 sus incompatibilidades quedan documentadas, sin ampliar el alcance de esta tarea.
 
-**Estado: validación específica aprobada; pendiente de revisión e integración.**
+**Estado: revisión de privacidad ampliada; suite específica pendiente de reejecución.**
+
+## Revisión adicional — resultados privados por participante
+
+La ruta ya seleccionaba la fila propia del participante antes de filtrar el ranking público; el filtro `confirmed` se aplica únicamente a la vista pública. La prueba anterior no representaba el ciclo real porque creaba un participante `confirmed` dentro de un desafío `running`. Se reemplazó por cobertura de una fila `persisted` sin resultado durante `running` y una fila `verified` en `completed` antes de la confirmación pública. La respuesta privada incluye ahora `result_status`, mientras que la vista pública sigue limitada a `confirmed`.
