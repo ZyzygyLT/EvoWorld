@@ -154,10 +154,14 @@ DEC-F7E-01 y CONTRACTS.md §18 fijan el siguiente alcance:
 
 - La galería pública incluye solo mundos públicos y no eliminados.
 - La proyección pública añade únicamente is_highlighted, booleano derivado de un destacado activo y vigente; no se persisten atributos redundantes ni se exponen metadatos internos.
-- Orden: is_highlighted DESC, id DESC. Cursor opaco, versionado y compuesto por la pareja (is_highlighted, id), validado contra los filtros.
-- Cambiar filtros exige reiniciar la paginación. Los cambios de destacados entre páginas se evalúan en cada consulta; no se garantiza snapshot ni ausencia de duplicados/saltos si el orden cambia durante la paginación.
+- Orden: is_highlighted DESC, id DESC. Cursor opaco, versionado y compuesto por la pareja (is_highlighted, id), vinculado al contexto normalizado mine, search, mode y limit; cambiar cualquiera de esos parámetros exige reiniciar la paginación.
+- La concesión posterior a una expiración desactiva atómicamente el registro vencido anterior y conserva su fila histórica; GET sigue siendo read-only.
+- La elegibilidad usa el checkpoint íntegro más reciente entre candidatos is_valid=true, verificado por SHA-256 sobre el payload sin mutaciones ni escrituras.
+- Los cambios de destacados entre páginas se evalúan en cada consulta; no se garantiza snapshot ni ausencia de duplicados/saltos si el orden cambia durante la paginación.
 - Se preservan privacidad DEC20/DEC21, permisos HTTP/WS, eliminación lógica F7-E.2-I, historial F7-E.1 y autoridad/elegibilidad F7-E.3. Destacar nunca hace público un mundo privado.
 - No incluye rankings globales.
+
+**Resolución de auditoría técnica (2026-11-24):** H1, H2 y H3 quedan resueltos en DEC-F7E-01 y CONTRACTS.md §18.4. La implementación y las pruebas siguen pendientes; esta actualización es exclusivamente contractual/documental.
 
 **Criterios de aceptación:** privacidad de la galería; booleano público estricto; cálculo de vigencia; orden y cursor compuestos; rechazo 400 de cursores inválidos/incompatibles; reinicio al cambiar filtros; exclusión de eliminados; retención histórica; permisos HTTP/WS sin ampliación; preservación de F7-E.3.
 
