@@ -906,3 +906,20 @@ Consolidación de DEC01–DEC21 y DEC-F7B-01…DEC-F7C-19 (F7-C-R1-I, 2026-11-16
   - No se implementa ni diseña en detalle el Nivel 2 durante F7-D-R1-B.
 - **Estado:** Aprobada / Contrato definido (F7-D-R1-B); implementación no iniciada.
 - **Origen:** F7-D-R1-B corrección contractual (2026-11-17).
+
+ 
+## DEC-F7E-01 — Integración de mundos destacados en la galería pública (F7-E.4)
+
+- **Decisión:** la galería pública identifica y prioriza los mundos que tienen un destacado activo y vigente. La representación pública incorpora exclusivamente el booleano derivado is_highlighted; no se persiste como atributo de WorldRow.
+- **Contrato de consulta y representación:**
+  - La consulta de galería pública incluye únicamente mundos públicos y no eliminados lógicamente.
+  - is_highlighted es siempre un booleano calculado a partir de la existencia de un destacado activo cuya vigencia no haya expirado. No se exponen el ID del registro destacado, fechas de concesión, identidad del administrador ni otros metadatos internos.
+  - La marca se incorpora a la proyección pública de la galería y a la ficha pública equivalente servida por HTTP/WS. No cambia la autorización, el alcance de suscripción ni los datos privados disponibles por HTTP o WS. Las proyecciones privadas de mine=1 conservan su contrato vigente y no reciben este campo por esta decisión.
+  - Un destacado retirado o vencido deja de marcarse y de recibir prioridad. La retirada o expiración no elimina el historial.
+- **Orden y paginación:** orden total por is_highlighted DESC, id DESC. El cursor es opaco, versionado y compuesto por el valor booleano y el ID de la última fila; el servidor valida su estructura y su compatibilidad con los filtros de la consulta. Un cursor inválido o incompatible se rechaza con HTTP 400. La continuación respeta primero el resto de mundos destacados por ID descendente y luego los no destacados por ID descendente.
+- **Filtros:** cambiar mine, search o mode obliga a iniciar una paginación nueva sin reutilizar el cursor anterior. El límite de página conserva los límites vigentes de F7-B.
+- **Consistencia entre páginas:** cada página evalúa el estado vigente de los destacados al momento de su consulta. No existe snapshot transaccional entre páginas; si un destacado se concede, retira o expira durante la paginación, el orden puede cambiar y no se garantiza ausencia de duplicados o saltos entre páginas. El cliente debe reiniciar la consulta para obtener una vista ordenada coherente.
+- **Privacidad y autoridad:** destacar un mundo no lo hace público ni concede permisos adicionales. Se preservan DEC20/DEC21, la allowlist pública y los contratos F7-E.1, F7-E.2-I y F7-E.3. La elegibilidad y la autoridad administrativa siguen gobernadas por F7-E.3.
+- **Restricciones:** no exponer metadatos internos de destacados; no persistir un booleano redundante en WorldRow; no cambiar la visibilidad ni las autorizaciones; no borrar historial; no modificar el contrato de mundos privados; no introducir rankings globales.
+- **Estado:** Aprobada / Contrato definido (F7-E.4); pendiente de implementación y verificación.
+- **Origen:** decisiones confirmadas por el usuario para F7-E.4 (2026-11-24).
