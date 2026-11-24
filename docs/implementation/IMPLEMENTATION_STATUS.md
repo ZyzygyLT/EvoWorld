@@ -4,7 +4,7 @@ Referencia compacta del estado del proyecto. **Primero leer esto** antes de prop
 
 Convención: se distingue siempre **implementado** (el código existe), **probado** (hay pruebas ejecutadas que lo demuestran) y **aceptado** (una etapa fue formalmente aceptada/cerrada). Un informe de implementación **no** equivale a verificación ni a aceptación.
 
-Última actualización de este archivo: 2026-11-24 (reconciliación documental F7-E: F7-E.1/F7-E.2 preservadas como aceptadas; contrato F7-E.3 registrado sin atribuir implementación no demostrada; F7-E.4 queda pendiente de definición; R0 identificado como propuesta histórica cuya numeración no gobierna el roadmap vigente).
+Última actualización de este archivo: 2026-11-24 (F7-E.4: contrato DEC-F7E-01 aprobado y registrado; implementación y verificación pendientes).
 
 ---
 
@@ -144,3 +144,21 @@ El documento R0 conserva una división preliminar F7-E.1–F7-E.6 y propuestas a
 - No se modifican código, modelos, migraciones, base de datos, pruebas, configuración ni documentos históricos R0.
 - No se declara F7-E.4 diseñado ni autorizado para implementación.
 - La definición de F7-E.4 deberá partir de los contratos vigentes y no reabrir F7-E.1 ni F7-E.2-I.
+
+ 
+## F7-E.4 — Integración de destacados en la galería pública
+
+**Estado: contrato definido y aprobado; implementación no iniciada / no verificada.**
+
+DEC-F7E-01 y CONTRACTS.md §18 fijan el siguiente alcance:
+
+- La galería pública incluye solo mundos públicos y no eliminados.
+- La proyección pública añade únicamente is_highlighted, booleano derivado de un destacado activo y vigente; no se persisten atributos redundantes ni se exponen metadatos internos.
+- Orden: is_highlighted DESC, id DESC. Cursor opaco, versionado y compuesto por la pareja (is_highlighted, id), validado contra los filtros.
+- Cambiar filtros exige reiniciar la paginación. Los cambios de destacados entre páginas se evalúan en cada consulta; no se garantiza snapshot ni ausencia de duplicados/saltos si el orden cambia durante la paginación.
+- Se preservan privacidad DEC20/DEC21, permisos HTTP/WS, eliminación lógica F7-E.2-I, historial F7-E.1 y autoridad/elegibilidad F7-E.3. Destacar nunca hace público un mundo privado.
+- No incluye rankings globales.
+
+**Criterios de aceptación:** privacidad de la galería; booleano público estricto; cálculo de vigencia; orden y cursor compuestos; rechazo 400 de cursores inválidos/incompatibles; reinicio al cambiar filtros; exclusión de eliminados; retención histórica; permisos HTTP/WS sin ampliación; preservación de F7-E.3.
+
+Esta actualización define el contrato. No acredita implementación, pruebas ni aceptación de la etapa implementada. No modifica código, pruebas, migraciones, base de datos ni documentos históricos R0.
