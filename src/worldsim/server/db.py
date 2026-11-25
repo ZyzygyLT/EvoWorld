@@ -113,48 +113,92 @@ class SessionRow(Base):
 
 class ChallengeRow(Base):
     __tablename__ = "challenges"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('draft','published','enrollment_open','enrollment_closed',"
+            "'preparing','running','completed','canceled','disputed','resolved','invalidated')",
+            name="ck_challenge_state",
+        ),
+        ForeignKeyConstraint(
+            ["organizer_user_id"], ["users.id"], ondelete="RESTRICT",
+            name="fk_challenges_organizer",
+        ),
+    )
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     organizer_user_id = Column(Integer, nullable=False)
     name = Column(String, nullable=False)
     config_json = Column(Text, nullable=False)
     rules_version = Column(String, nullable=False)
     duration_ticks = Column(Integer, nullable=False)
-    state = Column(String, default="draft")
+    state = Column(String(32), nullable=False, default="draft", server_default="draft")
     created_at = Column(String, nullable=False)
-    client_idempotency_key = Column(String, nullable=False)
-    request_hash = Column(String, nullable=False)
+    closed_at = Column(String, nullable=True)
+    completed_at = Column(String, nullable=True)
 
 
 class ChallengeParticipantRow(Base):
     __tablename__ = "challenge_participants"
+    __table_args__ = (
+        UniqueConstraint("challenge_id", "user_id", name="uq_challenge_participant_user"),
+        UniqueConstraint("world_id", name="uq_challenge_participant_world"),
+        CheckConstraint("result_verified IN (0, 1)", name="ck_challenge_participant_result_verified"),
+        ForeignKeyConstraint(["challenge_id"], ["challenges.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["world_id"], ["worlds.id"]),
+    )
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     challenge_id = Column(Integer, nullable=False)
     user_id = Column(Integer, nullable=False)
-    world_id = Column(Integer, nullable=False)
+    world_id = Column(Integer, nullable=True)
     public_alias = Column(String, nullable=False)
-    result_json = Column(Text, nullable=False)
-    result_status = Column(String, default="persisted")
-    result_verified = Column(Integer, default=0)
-    state = Column(String, default="activo")
+    state = Column(String(32), nullable=False, default="inscrito", server_default="inscrito")
+    joined_at = Column(String, nullable=False)
+    result_json = Column(Text, nullable=True)
+    result_status = Column(String(32), nullable=False, default="calculated", server_default="calculated")
+    result_verified = Column(Integer, nullable=False, default=0, server_default="0")
 
 
 class ChallengeOperationRow(Base):
     __tablename__ = "challenge_operations"
+    __table_args__ = (
+        UniqueConstraint(
+            "challenge_id", "actor_user_id", "client_idempotency_key",
+            name="uq_challenge_operation_idem",
+        ),
+        ForeignKeyConstraint(["challenge_id"], ["challenges.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["actor_user_id"], ["users.id"]),
+    )
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     challenge_id = Column(Integer, nullable=False)
-    operation_id = Column(String, nullable=False)
-    status = Column(String, nullable=False)
-    continuity_state = Column(String, nullable=False)
+    operation = Column(String(32), nullable=False)
+    actor_user_id = Column(Integer, nullable=False)
+    client_idempotency_key = Column(String(64), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    outcome = Column(String(32), nullable=True)
     created_at = Column(String, nullable=False)
-    requesting_user_id = Column(Integer, nullable=False)
-    client_idempotency_key = Column(String, nullable=False)
-    request_hash = Column(String, nullable=False)
-    engine_version = Column(String, default="1.0")
-    checkpoint_id = Column(Integer, nullable=False, default=0)
-    recovery_generation = Column(Integer, default=2)
+
+
+class ChallengeCreationRequestRow(Base):
+    __tablename__ = "challenge_creation_requests"
+    __table_args__ = (
+        UniqueConstraint(
+            "actor_user_id", "client_idempotency_key",
+            name="uq_challenge_creation_actor_key",
+        ),
+        UniqueConstraint("challenge_id", name="uq_challenge_creation_challenge"),
+        ForeignKeyConstraint(["actor_user_id"], ["users.id"]),
+        ForeignKeyConstraint(["challenge_id"], ["challenges.id"]),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    actor_user_id = Column(Integer, nullable=False)
+    client_idempotency_key = Column(String(64), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    challenge_id = Column(Integer, nullable=False)
+    created_at = Column(String, nullable=False)
 
 
 
