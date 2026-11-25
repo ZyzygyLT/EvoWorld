@@ -255,7 +255,7 @@ class LoginRequest(BaseModel):
 
 
 class WorldHighlightRequest(BaseModel):
-    reason: str = Field(min_length=1, max_length=2000)
+    reason: str = Field(min_length=1)
     duration_months: int | None = None
 
 
