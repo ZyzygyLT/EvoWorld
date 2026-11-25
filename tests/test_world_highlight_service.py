@@ -190,3 +190,137 @@ def test_world_without_intact_checkpoint_is_rejected(highlight_env):
             world_id, admin_id, "no intact checkpoint", session_factory=factory,
             now=datetime(2026, 6, 1, tzinfo=timezone.utc),
         )
+
+
+# ---------------------------------------------------------------------------
+# F7-E.3 P0 closure coverage — additive service tests.
+# ---------------------------------------------------------------------------
+
+def test_world_with_missing_owner_account_is_rejected_without_highlight(highlight_env):
+    engine, factory, (admin_id, _owner_id, world_id) = highlight_env
+
+    # Create an orphan only inside this isolated test database. The production
+    # schema and its foreign-key constraints remain unchanged.
+    raw = engine.raw_connection()
+    try:
+        cursor = raw.cursor()
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.execute(
+            "UPDATE worlds SET owner_user_id = ? WHERE id = ?",
+            (999999, world_id),
+        )
+        raw.commit()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+    finally:
+        raw.close()
+
+    with pytest.raises(WorldNotEligible):
+        grant_highlight(
+            world_id, admin_id, "orphan owner", session_factory=factory,
+            now=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        )
+
+    with factory() as session:
+        assert session.scalar(
+            select(WorldHighlight.id).where(WorldHighlight.world_id == world_id)
+        ) is None
+
+
+def test_paused_world_with_intact_checkpoint_is_eligible(highlight_env):
+    _engine, factory, (admin_id, _owner_id, world_id) = highlight_env
+    with factory.begin() as session:
+        session.get(WorldRow, world_id).status = "paused"
+
+    row = grant_highlight(
+        world_id, admin_id, "paused world", session_factory=factory,
+        now=datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+    assert row.is_active == 1
+
+
+def test_invalid_checkpoint_is_ignored_even_when_checksum_matches(highlight_env):
+    _engine, factory, (admin_id, _owner_id, world_id) = highlight_env
+    with factory.begin() as session:
+        checkpoints = session.scalars(
+            select(WorldCheckpoint).where(WorldCheckpoint.world_id == world_id)
+        ).all()
+        for checkpoint in checkpoints:
+            checkpoint.is_valid = 0
+
+    with pytest.raises(WorldNotEligible):
+        grant_highlight(
+            world_id, admin_id, "invalid candidates", session_factory=factory,
+            now=datetime(2026, 8, 3, tzinfo=timezone.utc),
+        )
+
+
+def test_payload_mutation_with_original_checksum_is_rejected(highlight_env):
+    _engine, factory, (admin_id, _owner_id, world_id) = highlight_env
+    with factory.begin() as session:
+        checkpoint = session.scalar(
+            select(WorldCheckpoint)
+            .where(WorldCheckpoint.world_id == world_id)
+            .order_by(WorldCheckpoint.sequence)
+        )
+        checkpoint.payload = b'{"checkpoint":"tampered"}'
+
+    with pytest.raises(WorldNotEligible):
+        grant_highlight(
+            world_id, admin_id, "tampered payload", session_factory=factory,
+            now=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        )
+
+
+def test_multiple_corrupt_candidates_fall_back_to_oldest_intact(highlight_env):
+    _engine, factory, (admin_id, _owner_id, world_id) = highlight_env
+    payload = b'{"checkpoint":"oldest-intact"}'
+    with factory.begin() as session:
+        session.add_all([
+            WorldCheckpoint(
+                world_id=world_id, sequence=3, month=2, checkpoint_type="periodic",
+                payload=b"bad-3", checksum="3" * 64, created_at="now",
+                is_valid=1, checkpoint_version=2,
+            ),
+            WorldCheckpoint(
+                world_id=world_id, sequence=4, month=3, checkpoint_type="periodic",
+                payload=b"bad-4", checksum="4" * 64, created_at="now",
+                is_valid=1, checkpoint_version=2,
+            ),
+        ])
+        oldest = session.scalar(
+            select(WorldCheckpoint)
+            .where(WorldCheckpoint.world_id == world_id, WorldCheckpoint.sequence == 1)
+        )
+        oldest.payload = payload
+        oldest.checksum = hashlib.sha256(payload).hexdigest()
+
+    row = grant_highlight(
+        world_id, admin_id, "fallback through corrupt candidates",
+        session_factory=factory, now=datetime(2026, 8, 5, tzinfo=timezone.utc),
+    )
+    assert row.is_active == 1
+
+
+def test_checkpoint_verification_preserves_all_candidate_fields(highlight_env):
+    _engine, factory, (admin_id, _owner_id, world_id) = highlight_env
+    fields = ("payload", "checksum", "is_valid", "sequence", "checkpoint_version")
+
+    def snapshot():
+        with factory() as session:
+            rows = session.scalars(
+                select(WorldCheckpoint)
+                .where(WorldCheckpoint.world_id == world_id)
+                .order_by(WorldCheckpoint.sequence)
+            ).all()
+            return [
+                tuple(getattr(row, field) for field in fields)
+                for row in rows
+            ]
+
+    before = snapshot()
+    grant_highlight(
+        world_id, admin_id, "read-only checkpoint validation",
+        session_factory=factory, now=datetime(2026, 8, 6, tzinfo=timezone.utc),
+    )
+    assert snapshot() == before
