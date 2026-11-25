@@ -1,10 +1,10 @@
 # F7-E.4 — Contrato de integración de destacados en la galería pública
 Fecha: 2026-11-24
-Rama: feature/evoworld-review
+Rama de implementación: feature/f7-e4-implementation
 
 ## Estado
 
-Contrato aprobado; implementación y verificación pendientes. Este documento registra las decisiones confirmadas para F7-E.4. No constituye evidencia de código implementado ni de pruebas ejecutadas.
+Contrato aprobado. La implementación se encuentra en feature/f7-e4-implementation; la evidencia de validación se registra por separado y no implica aceptación de la regresión completa.
 
 ## Decisiones aprobadas
 
@@ -14,11 +14,11 @@ Contrato aprobado; implementación y verificación pendientes. Este documento re
 4. Ordenar por is_highlighted DESC, id DESC.
 5. Usar cursor opaco y versionado cuyo contenido lógico es (is_highlighted, id); el servidor valida su estructura y compatibilidad con los filtros.
 6. Rechazar con HTTP 400 cursores inválidos o incompatibles.
-7. Reiniciar paginación cuando cambie mine, search o mode.
+7. Reiniciar paginación cuando cambie mine, search, mode o limit.
 8. Evaluar vigencia en cada página. No se promete snapshot entre páginas ni ausencia de duplicados/saltos si cambia el estado de destacados durante la navegación.
 9. Mantener privacidad DEC20/DEC21, permisos HTTP/WS, reglas de elegibilidad/autoridad F7-E.3, historial F7-E.1 y eliminación lógica F7-E.2-I.
 10. Un destacado no hace público un mundo privado ni concede permisos adicionales.
-11. No incorporar rankings globales.
+11. No incorporar rankings globales.\n12. No añadir un filtro highlighted=1: is_highlighted solo informa el estado y el orden prioriza automáticamente los destacados.
 
 ## Compatibilidad HTTP y WebSocket
 
@@ -31,14 +31,14 @@ El booleano se limita a las proyecciones públicas de galería y ficha pública 
 - Destacados retirados o vencidos dejan de marcarse y priorizarse.
 - El orden compuesto y la continuación del cursor son correctos.
 - Cursores inválidos/incompatibles se rechazan con 400.
-- Cambiar filtros obliga a reiniciar paginación.
+- Cambiar mine, search, mode o limit obliga a reiniciar paginación.\n- No existe filtro de galería highlighted=1; la galería devuelve mundos públicos y prioriza los destacados automáticamente.
 - Retirada/expiración conserva historial.
 - No cambian permisos HTTP/WS ni se revela estado vivo adicional.
 - Se preservan autoridad y elegibilidad F7-E.3.
 
 ## Fuera de alcance
 
-Implementación, migraciones, cambios de esquema, pruebas, UI, rankings globales y cualquier modificación de F7-E.1, F7-E.2-I o F7-E.3.
+Migraciones, cambios de esquema, UI, rankings globales y cualquier modificación de F7-E.1, F7-E.2-I o F7-E.3.
 
 ## Referencias
 
