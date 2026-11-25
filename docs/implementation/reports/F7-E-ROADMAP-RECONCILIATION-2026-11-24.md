@@ -1,5 +1,7 @@
 # F7-E — Reconciliación de roadmap y contrato F7-E.3
 
+> **Nota de vigencia (2026-11-24):** este documento es una fotografía histórica de la rama `feature/evoworld-review`, anterior a la implementación y aceptación de F7-E.4. Su estado «F7-E.4 pendiente de definición» queda superado por `docs/implementation/reports/F7-E.5-FINAL-AUDIT-2026-11-24.md`, que audita la rama `feature/f7-e4-implementation`. Se conserva el contenido original como registro de auditoría; no usar su sección de estado como roadmap vigente.
+
 **Fecha:** 2026-11-24  
 **Repositorio:** `ZyzygyLT/EvoWorld`  
 **Rama:** `feature/evoworld-review`  
