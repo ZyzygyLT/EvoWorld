@@ -483,7 +483,6 @@ def test_expired_highlight_is_not_publicly_active_and_get_is_read_only(tmp_path)
     assert response.status_code == 200
     world = next(item for item in response.json()["worlds"] if item["id"] == world_id)
     assert world["is_highlighted"] is False
-    assert c.get("/api/worlds", params={"highlighted": "1"}).json()["worlds"] == []
 
     with dbmod_local.SessionLocal() as session:
         row = session.query(WorldHighlight).filter_by(world_id=world_id).one()
@@ -492,11 +491,11 @@ def test_expired_highlight_is_not_publicly_active_and_get_is_read_only(tmp_path)
         assert row.revoked_by_admin_user_id is None
 
 
-def test_highlight_filter_returns_only_current_highlights(tmp_path):
+def test_highlight_query_parameter_does_not_filter_public_gallery(tmp_path):
     c = _fresh(tmp_path)
     hdr = _register(c)
     highlighted_id = _make_published_world(c, hdr, name="Highlighted")
-    _make_published_world(c, hdr, name="Ordinary")
+    ordinary_id = _make_published_world(c, hdr, name="Ordinary")
 
     import worldsim.server.db as dbmod_local
     from worldsim.server.db import WorldHighlight
@@ -515,8 +514,9 @@ def test_highlight_filter_returns_only_current_highlights(tmp_path):
 
     response = c.get("/api/worlds", params={"highlighted": "1"})
     assert response.status_code == 200
-    assert [world["id"] for world in response.json()["worlds"]] == [highlighted_id]
-    assert response.json()["worlds"][0]["is_highlighted"] is True
+    worlds = response.json()["worlds"]
+    assert [world["id"] for world in worlds] == [highlighted_id, ordinary_id]
+    assert [world["is_highlighted"] for world in worlds] == [True, False]
 
 
 
