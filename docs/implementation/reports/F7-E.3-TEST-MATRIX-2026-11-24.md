@@ -118,3 +118,46 @@ Se añadió `tests/test_world_highlight_postgresql.py`, sin cambios en código d
 **Commit de implementación:** `4fa24626d2a069fd142ad2b6323936ced713107d`.
 
 **Estado:** implementado, todavía no ejecutado. La ejecución y validación de resultados siguen pendientes; no se declara P09/P10 aprobados ni F7-E.3 aceptada.
+
+
+## 9. Cierre de ejecución focalizada — 2026-11-24
+
+La ejecución de las pruebas P0 y de concurrencia PostgreSQL se completó después de la redacción de las secciones anteriores. Las referencias previas que indican «pendiente» describen el estado histórico al momento de su escritura y quedan reemplazadas por este addendum.
+
+### SQLite temporal: servicio, API y esquema
+
+Comando ejecutado por el usuario:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m pytest -q `
+  tests/test_world_highlight_service.py `
+  tests/test_world_highlight_api.py `
+  tests/test_world_highlights_schema.py
+```
+
+**Resultado reportado:** `24 passed, 1 warning in 10.70s`.
+
+El único warning fue `StarletteDeprecationWarning` por el uso de `httpx` con `starlette.testclient`. No hubo fallos.
+
+### PostgreSQL real: P09 y P10
+
+Se ejecutó `tests/test_world_highlight_postgresql.py` contra PostgreSQL 16, configurando explícitamente `EVOWORLD_TEST_POSTGRES_URL` para la base dedicada `evoworld_test`.
+
+**Resultado reportado:** `2 passed in 2.45s`.
+
+P09 valida dos concesiones concurrentes: una concesión exitosa, un conflicto y exactamente una fila activa. P10 valida concesión y retirada concurrentes, acepta los órdenes seriales posibles y comprueba conservación del historial y ausencia de más de una fila activa.
+
+El fixture valida el backend PostgreSQL, rechaza bases cuyo nombre no sea `evoworld_test`, no lee `WORLDSIM_DB`, crea un esquema aleatorio por test y elimina exclusivamente ese esquema.
+
+### Resumen de evidencia
+
+| Batería | Resultado |
+|---|---:|
+| Servicio + API + esquema (SQLite temporal) | 24 passed |
+| Concurrencia PostgreSQL P09/P10 | 2 passed |
+| **Total de casos ejecutados en ambas baterías** | **26 passed** |
+
+Son dos ejecuciones focalizadas separadas, no una única ejecución ni una regresión global completa. El warning de Starlette queda registrado y no representa fallo.
+
+**Estado actualizado:** P0 y P09/P10 ejecutados y aprobados por los resultados reportados. No se modificó código de producción en esta fase. Los casos P1 de la sección 3 siguen fuera de este cierre; no se declara su cobertura completa. La aceptación formal de F7-E.3 corresponde al usuario. No se afirma que la regresión global esté limpia.
