@@ -3,7 +3,7 @@
 **Fecha:** 2026-11-24  
 **Rama de referencia:** `feature/f7-e4-implementation`  
 **HEAD inspeccionado:** `89cbbceb279257c234d7e99a453c63f67e2ac7fd`  
-**Estado:** especificación documental; no se añadieron ni ejecutaron pruebas en esta preparación.
+**Estado:** especificación documental con implementación parcial de pruebas añadida el 2026-11-24; ejecución pendiente.
 
 ## 1. Objetivo
 
@@ -84,3 +84,21 @@ F7-E.3 podrá proponerse para aceptación formal cuando:
 - el resultado de regresión se comunique sin atribuir a F7-E fallos de otras etapas sin aislamiento causal.
 
 Esta matriz es una especificación, no un acta de ejecución ni una aceptación de F7-E.3.
+
+
+## 7. Estado de implementación de pruebas — 2026-11-24
+
+Se añadieron pruebas de servicio en `tests/test_world_highlight_service.py` para:
+- E3-P01: propietario inexistente mediante fixture huérfana confinada a la BD temporal, sin cambiar el esquema.
+- E3-P02: mundo `paused` elegible.
+- E3-P04: candidatos `is_valid=0` ignorados aunque su checksum coincida.
+- E3-P05: payload alterado con checksum original rechazado.
+- E3-P06: varios candidatos corruptos seguidos de uno íntegro.
+- E3-P07: snapshot antes/después de payload, checksum, is_valid, sequence y checkpoint_version.
+- E3-P08: espías que fallan si se invocan `CheckpointRepository.get_latest_valid_checkpoint()` o `RecoveryManager.recover()`.
+
+E3-P03 ya estaba cubierto por `test_ineligible_world_is_rejected` con estado `closed`; no se duplicó.
+
+**Pendiente de entorno:** E3-P09 y E3-P10 requieren PostgreSQL real y una base de integración exclusiva, aislada y desechable. No se añadieron pruebas que puedan conectarse accidentalmente a una base compartida o de producción. Antes de implementarlas se debe proporcionar/configurar un DSN explícitamente dedicado a tests y definir su política de creación/limpieza.
+
+**Estado de ejecución:** las pruebas nuevas todavía no se han ejecutado. Los commits de edición documental/código de pruebas no constituyen evidencia de aprobación. F7-E.3 permanece sin aceptación final hasta ejecutar la batería y resolver o aceptar expresamente la limitación PostgreSQL.
