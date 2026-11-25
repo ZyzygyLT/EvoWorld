@@ -107,7 +107,8 @@ def test_f7d_challenge_columns_and_constraints(tmp_path):
     fks = {tuple(fk["constrained_columns"]): fk for fk in insp.get_foreign_keys("challenges")}
     assert ("organizer_user_id",) in fks
     assert fks[("organizer_user_id",)]["referred_table"] == "users"
-    assert fks[("organizer_user_id",)]["options"]["ondelete"] == "CASCADE"
+    # DEC-F7D-20: preserve challenge history; organizer deletion is restricted.
+    assert fks[("organizer_user_id",)]["options"]["ondelete"] == "RESTRICT"
 
     with eng.connect() as conn:
         row = conn.execute(
