@@ -156,7 +156,7 @@ class ChallengeParticipantRow(Base):
     state = Column(String(32), nullable=False, default="inscrito", server_default="inscrito")
     joined_at = Column(String, nullable=False)
     result_json = Column(Text, nullable=True)
-    result_status = Column(String(32), nullable=False, default="calculated", server_default="calculated")
+    result_status = Column(String(32), nullable=False, default="persisted", server_default="persisted")
     result_verified = Column(Integer, nullable=False, default=0, server_default="0")
 
 
