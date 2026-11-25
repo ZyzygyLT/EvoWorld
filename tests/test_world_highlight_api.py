@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 import worldsim.server.app as appmod
 import worldsim.server.db as dbmod
 import worldsim.server.runner as runnermod
-from worldsim.server.db import Base, UserRow, WorldCheckpoint, WorldHighlight, WorldRow
+from worldsim.server.db import UserRow, WorldCheckpoint, WorldHighlight
 
 _seq = itertools.count(1)
 
