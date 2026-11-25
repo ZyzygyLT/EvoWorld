@@ -43,7 +43,7 @@ from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconne
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 from worldsim.data.loaders import load_governments, load_races
@@ -57,6 +57,7 @@ from worldsim.server.db import (
     WorldOperation,
     WorldEvent,
     WorldCheckpoint,
+    WorldHighlight,
 )
 from worldsim.server.errors import (
     forget_not_recoverable,
@@ -428,6 +429,86 @@ def get_meta() -> dict:
 # -- worlds ----------------------------------------------------------------------
 
 
+def _highlighted_expression(now_iso: str):
+    return exists(
+        select(1).select_from(WorldHighlight).where(
+            WorldHighlight.world_id == WorldRow.id,
+            WorldHighlight.is_active == 1,
+            or_(
+                WorldHighlight.expires_at.is_(None),
+                WorldHighlight.expires_at > now_iso,
+            ),
+        )
+    )
+
+
+def _highlight_cursor_fingerprint(
+    mine: str | None,
+    search: str | None,
+    mode: str | None,
+    limit: int,
+    highlighted: str | None,
+) -> str:
+    canonical = json.dumps(
+        {
+            "mine": mine,
+            "search": search,
+            "mode": mode,
+            "limit": limit,
+            "highlighted": highlighted,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _issue_highlight_cursor(
+    is_highlighted: bool, world_id: int, fingerprint: str
+) -> str:
+    payload = {
+        "v": 1,
+        "is_highlighted": bool(is_highlighted),
+        "id": int(world_id),
+        "fp": fingerprint,
+    }
+    body = _b64u(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+    secret = os.environ.get("WORLDSIM_HIGHLIGHT_CURSOR_SECRET") or SNAPSHOT_SECRET
+    signature = hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    return f"h1.{body}.{_b64u(signature)}"
+
+
+def _parse_highlight_cursor(token: str, fingerprint: str) -> tuple[bool, int]:
+    invalid = HTTPException(400, "invalid or incompatible cursor")
+    try:
+        parts = token.split(".")
+        if len(parts) != 3 or parts[0] != "h1":
+            raise invalid
+        _, body, signature = parts
+        secret = os.environ.get("WORLDSIM_HIGHLIGHT_CURSOR_SECRET") or SNAPSHOT_SECRET
+        expected = hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+        if not hmac.compare_digest(_unb64u(signature), expected):
+            raise invalid
+        payload = json.loads(_unb64u(body))
+        if not isinstance(payload, dict) or payload.get("v") != 1:
+            raise invalid
+        highlighted_value = payload.get("is_highlighted")
+        world_id = payload.get("id")
+        if type(highlighted_value) is not bool:
+            raise invalid
+        if type(world_id) is not int or world_id <= 0 or world_id > 2**63 - 1:
+            raise invalid
+        if payload.get("fp") != fingerprint:
+            raise invalid
+        return highlighted_value, world_id
+    except HTTPException:
+        raise
+    except Exception:
+        raise invalid from None
+
+
 @app.get("/api/worlds")
 def list_worlds(
     limit: int | None = None,
@@ -435,20 +516,12 @@ def list_worlds(
     search: str | None = None,
     mode: str | None = None,
     mine: str | None = None,
+    highlighted: str | None = None,
     authorization: str | None = Header(default=None),
 ) -> dict:
-    """DEC20/§14.5 + DEC-F7B-01 a DEC-F7B-03: listado paginado de mundos.
-
-    Dos modos independientes:
-    - Modo público (mine ausente): solo visibility = public, sin sesión requerida.
-    - Modo propietario (mine=1): requiere sesión, solo owner_user_id = user_id.
-
-    Respuesta: {"worlds": [...], "next_cursor": int | null}.
-    Algoritmo limit + 1 para detección de página siguiente.
-    """
+    """F7-B gallery with F7-E.4 public highlight ordering and opaque cursor."""
     user = _auth_user(authorization)
 
-    # --- Validar mine (DEC-F7B-01 / DEC-F7B-01-A) ---
     owner_mode = False
     if mine is not None:
         if mine != "1":
@@ -457,33 +530,24 @@ def list_worlds(
             raise HTTPException(401, "log in to list your worlds")
         owner_mode = True
 
-    # --- Validar limit ---
     page_limit = 20
     if limit is not None:
         if limit < 1 or limit > 100:
             raise HTTPException(400, "limit must be between 1 and 100")
         page_limit = limit
 
-    # --- Validar cursor (DEC-F7B-03): punto de corte entero, sin requerir existencia ---
-    cursor_id: int | None = None
-    if cursor is not None:
-        try:
-            cursor_id = int(cursor)
-        except (TypeError, ValueError):
-            raise HTTPException(400, "cursor must be an integer")
-        if cursor_id <= 0:
-            raise HTTPException(400, "cursor must be a positive integer")
-        # SQLite INTEGER es signed 64-bit; valores mayores no son representables.
-        if cursor_id > 2**63 - 1:
-            raise HTTPException(400, "cursor exceeds maximum allowed value")
+    if highlighted is not None:
+        if highlighted != "1" or owner_mode:
+            raise HTTPException(400, "highlighted must be '1' and is only available in the public gallery")
 
-    # --- Validar search (DEC-F7B-04): máx 64 chars, escapar comodines SQL ---
     search_pattern: str | None = None
+    normalized_search: str | None = None
     if search is not None:
         stripped = search.strip()
         if len(stripped) > 64:
             raise HTTPException(400, "search must be at most 64 characters")
         if stripped:
+            normalized_search = stripped
             escaped = (
                 stripped.replace("\\", "\\\\")
                 .replace("%", "\\%")
@@ -491,32 +555,51 @@ def list_worlds(
             )
             search_pattern = f"%{escaped}%"
 
-    # --- Validar mode (DEC-F7B-05) ---
     if mode is not None and mode not in ("single", "league"):
         raise HTTPException(400, "mode must be 'single' or 'league'")
 
-    # --- Construir consulta con proyección explícita (sin state_json) ---
-    with db.SessionLocal() as db_:  # type: ignore[call-arg]
-        q = select(
-            WorldRow.id,
-            WorldRow.name,
-            WorldRow.mode,
-            WorldRow.seed,
-            WorldRow.months_simulated,
-            WorldRow.land_pct,
-            WorldRow.created_at,
-            WorldRow.season_years,
-            WorldRow.season_over,
-            WorldRow.visibility,
-            WorldRow.owner_user_id,  # solo para derivar mine, nunca expuesto
-        ).order_by(WorldRow.id.desc())
-
+    cursor_id: int | None = None
+    cursor_highlighted: bool | None = None
+    fingerprint = _highlight_cursor_fingerprint(
+        mine, normalized_search, mode, page_limit, highlighted
+    )
+    if cursor is not None:
         if owner_mode:
-            # Modo propietario: solo mundos del usuario autenticado
-            q = q.where(WorldRow.owner_user_id == user.id)  # type: ignore[union-attr]
+            try:
+                cursor_id = int(cursor)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "cursor must be an integer")
+            if cursor_id <= 0 or cursor_id > 2**63 - 1:
+                raise HTTPException(400, "cursor must be a positive signed 64-bit integer")
         else:
-            # Modo público: solo mundos públicos (fail-closed en SQL)
+            cursor_highlighted, cursor_id = _parse_highlight_cursor(cursor, fingerprint)
+
+    now_iso = highlight_service.utc_iso(highlight_service.utc_now())
+    highlighted_expr = _highlighted_expression(now_iso)
+
+    columns = (
+        WorldRow.id,
+        WorldRow.name,
+        WorldRow.mode,
+        WorldRow.seed,
+        WorldRow.months_simulated,
+        WorldRow.land_pct,
+        WorldRow.created_at,
+        WorldRow.season_years,
+        WorldRow.season_over,
+        WorldRow.visibility,
+        WorldRow.owner_user_id,
+    )
+    with db.SessionLocal() as db_:
+        if owner_mode:
+            q = select(*columns).order_by(WorldRow.id.desc())
+            q = q.where(WorldRow.owner_user_id == user.id)
+        else:
+            q = select(*columns, highlighted_expr.label("is_highlighted"))
+            q = q.order_by(highlighted_expr.desc(), WorldRow.id.desc())
             q = q.where(WorldRow.visibility == "public")
+            if highlighted == "1":
+                q = q.where(highlighted_expr.is_(True))
 
         if search_pattern is not None:
             q = q.where(
@@ -524,25 +607,48 @@ def list_worlds(
                     func.lower(search_pattern), escape="\\"
                 )
             )
-
         if mode is not None:
             q = q.where(WorldRow.mode == mode)
 
-        if cursor_id is not None:
-            q = q.where(WorldRow.id < cursor_id)
-
-        # F7-E.2 (B3-3): the ordinary listing excludes logically deleted
-        # worlds in SQL (privacy/order/pagination above are unchanged).
         q = q.where(WorldRow.deleted_at.is_(None))
 
-        # limit + 1 para detectar página siguiente
+        if cursor_id is not None:
+            if owner_mode:
+                q = q.where(WorldRow.id < cursor_id)
+            elif cursor_highlighted:
+                q = q.where(
+                    or_(
+                        and_(highlighted_expr.is_(True), WorldRow.id < cursor_id),
+                        highlighted_expr.is_(False),
+                    )
+                )
+            else:
+                q = q.where(
+                    highlighted_expr.is_(False),
+                    WorldRow.id < cursor_id,
+                )
+
         rows = db_.execute(q.limit(page_limit + 1)).all()
 
     has_next = len(rows) > page_limit
     worlds_rows = rows[:page_limit]
-    next_cursor = worlds_rows[-1].id if has_next else None
+    if not has_next:
+        next_cursor = None
+    elif owner_mode:
+        next_cursor = worlds_rows[-1].id
+    else:
+        last = worlds_rows[-1]
+        next_cursor = _issue_highlight_cursor(
+            bool(last.is_highlighted), last.id, fingerprint
+        )
 
-    worlds = [_public_ficha(row, user) for row in worlds_rows]
+    if owner_mode:
+        worlds = [_public_ficha(row, user) for row in worlds_rows]
+    else:
+        worlds = [
+            _public_ficha(row, user, is_highlighted=bool(row.is_highlighted))
+            for row in worlds_rows
+        ]
 
     return {"worlds": worlds, "next_cursor": next_cursor}
 
