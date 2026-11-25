@@ -510,6 +510,7 @@ def _parse_highlight_cursor(token: str, fingerprint: str) -> tuple[bool, int]:
 
 
 @app.get("/api/worlds")
+@app.get("/api/worlds")
 def list_worlds(
     limit: int | None = None,
     cursor: str | None = None,
