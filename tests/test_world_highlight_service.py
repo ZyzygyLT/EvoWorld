@@ -4,7 +4,7 @@ import hashlib
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from worldsim.server import db
@@ -103,10 +103,7 @@ def test_grant_closes_expired_row_without_faking_revocation(highlight_env):
         assert old.revoked_at is None
         assert old.revoked_by_admin_user_id is None
         assert new.is_active == 1
-        assert session.scalar(
-            select(db.func.count()).select_from(WorldHighlight)
-            if hasattr(db, "func") else select(WorldHighlight.id)
-        ) is not None
+        assert session.scalar(select(func.count()).select_from(WorldHighlight)) == 2
 
 
 def test_revoke_is_auditable_and_keeps_history(highlight_env):
