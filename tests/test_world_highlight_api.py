@@ -92,7 +92,8 @@ def _public_world(client: TestClient, headers: dict, *, checkpoint: bool = True)
 
 def test_admin_grant_duplicate_conflict_public_projection_and_revoke(client):
     admin = _register(client, admin=True)
-    world_id = _public_world(client, admin)
+    owner = _register(client)
+    world_id = _public_world(client, owner)
 
     granted = client.post(
         f"/api/admin/worlds/{world_id}/highlight",
@@ -145,7 +146,8 @@ def test_admin_grant_duplicate_conflict_public_projection_and_revoke(client):
 def test_highlight_admin_authorization_and_duration_validation(client):
     ordinary = _register(client)
     admin = _register(client, admin=True)
-    world_id = _public_world(client, admin)
+    owner = _register(client)
+    world_id = _public_world(client, owner)
 
     anonymous = client.post(
         f"/api/admin/worlds/{world_id}/highlight",
@@ -177,7 +179,8 @@ def test_highlight_admin_authorization_and_duration_validation(client):
 
 def test_ineligible_world_cannot_be_highlighted(client):
     admin = _register(client, admin=True)
-    world_id = _public_world(client, admin, checkpoint=False)
+    owner = _register(client)
+    world_id = _public_world(client, owner, checkpoint=False)
 
     response = client.post(
         f"/api/admin/worlds/{world_id}/highlight",
@@ -193,10 +196,22 @@ def test_ineligible_world_cannot_be_highlighted(client):
 
 def test_unhighlight_without_active_row_is_404(client):
     admin = _register(client, admin=True)
-    world_id = _public_world(client)
+    owner = _register(client)
+    world_id = _public_world(client, owner)
 
     response = client.post(
         f"/api/admin/worlds/{world_id}/unhighlight",
         headers=admin,
     )
     assert response.status_code == 404
+
+def test_world_owner_cannot_highlight_own_world_even_if_admin(client):
+    admin_owner = _register(client, admin=True)
+    world_id = _public_world(client, admin_owner)
+
+    response = client.post(
+        f"/api/admin/worlds/{world_id}/highlight",
+        headers=admin_owner,
+        json={"reason": "self grant"},
+    )
+    assert response.status_code == 400
