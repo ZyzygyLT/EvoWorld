@@ -336,6 +336,8 @@ def admin_highlight_world(
         raise HTTPException(400, str(exc)) from None
     except highlight_service.ActiveHighlightExists as exc:
         raise HTTPException(409, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
     return {"world_highlight_id": row.id}
 
 
