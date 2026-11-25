@@ -420,6 +420,9 @@ def test_paginated_cursor_is_bound_to_filters_and_limit(tmp_path):
     assert c.get(
         "/api/worlds", params={"limit": 1, "search": "other", "cursor": cursor}
     ).status_code == 400
+    assert c.get(
+        "/api/worlds", params={"limit": 1, "mode": "league", "cursor": cursor}
+    ).status_code == 400
 
 
 def test_highlights_sort_before_newer_unhighlighted_worlds_and_cursor_crosses_groups(tmp_path):
