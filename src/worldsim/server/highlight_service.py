@@ -138,6 +138,9 @@ def grant_highlight(
                 # Expiration closes the active row but is not an administrative
                 # revocation: preserve revoked_at/revoked_by as NULL.
                 current.is_active = 0
+                # Free the partial unique index before inserting the replacement.
+                # Both writes remain inside this same transaction.
+                session.flush()
 
             highlight = WorldHighlight(
                 world_id=world_id,
