@@ -248,7 +248,7 @@ Estas cuestiones quedaron pendientes en F7-A y fueron resueltas por el encargo F
 
 ## 15. Galería pública de mundos (DEC-F7B-01 a DEC-F7B-10 — F7-B)
 
-> **Estado:** contrato definido (F7-B-R1, 2026-11-16). Implementación **no iniciada**. Ningún código de galería existe aún; esta sección especifica el contrato futuro sobre la implementación de F7-A.
+> **Estado:** contrato base de F7-B implementado y verificado. Esta sección conserva el contrato original de galería; la extensión posterior de destacados, su proyección pública, orden compuesto y cursor opaco se rigen por §18 (F7-E.4). En caso de diferencia sobre esos aspectos, prevalece §18.
 
 ### 15.1 Alcance
 
@@ -256,7 +256,9 @@ Estas cuestiones quedaron pendientes en F7-A y fueron resueltas por el encargo F
 - Modo público: devuelve exclusivamente mundos con `visibility = public`. Disponible para visitantes anónimos y usuarios autenticados. Nunca incluye mundos privados, incluso si pertenecen al usuario autenticado.
 - Modo propietario (`mine=1`): requiere sesión autenticada. Devuelve exclusivamente mundos cuyo `owner_user_id` coincide con el `user_id` de la sesión. Puede incluir mundos públicos y privados propios. Nunca devuelve mundos pertenecientes a terceros. `user_token` no es prueba de propiedad.
 - La galería pública y la consulta de mundos propios pueden compartir el formato de respuesta paginado, pero mantienen consultas y condiciones de acceso separadas.
-- F7-B **no** incorpora mundos destacados, rankings globales, desafíos, sistemas de recomendación, votaciones, likes, comentarios ni reputación. Estas funcionalidades pertenecen a etapas posteriores (F7-C a F7-F).
+- F7-B, en su alcance original, **no incorporó** mundos destacados, rankings globales, desafíos, sistemas de recomendación, votaciones, likes, comentarios ni reputación. La extensión posterior de destacados se especifica exclusivamente en §18 (F7-E.4); este texto histórico no contradice esa extensión.
+
+> **Precedencia F7-E.4:** para la galería pública, el cursor entero y el orden `id DESC` descritos en esta sección son la línea base histórica de F7-B. La extensión pública vigente usa el cursor opaco/versionado y el orden compuesto definidos en §18. El modo privado `mine=1` conserva su contrato de representación; véase §18.1.
 
 ### 15.2 Parámetros de consulta de `GET /api/worlds`
 
@@ -302,6 +304,7 @@ Ambos modos utilizan el mismo formato de respuesta paginado, no una lista simple
 ```
 
 - `worlds` se construye con `_public_ficha` (allowlist explícita de DEC20 §14.4). Nunca serialización del modelo con eliminación de campos.
+- Para la proyección pública, §18 amplía esta respuesta exclusivamente con `is_highlighted`, booleano derivado. La respuesta privada `mine=1` no incorpora ese campo por F7-E.4.
 - `mine` es `true` solo cuando el solicitante es el propietario autenticado del mundo. En modo público anónimo siempre es `false`. En modo propietario (`mine=1`) puede ser `true` para mundos propios y `false` no aplica (todos son del propietario).
 - `visibility` es `"public"` en modo público. En modo propietario puede ser `"public"` o `"private"` según el valor persistido de cada mundo propio.
 - `next_cursor` se calcula con el algoritmo `limit + 1` (§15.3.1).
@@ -1575,4 +1578,4 @@ Registro durable de operaciones globales de desafío (procedencia exigida por §
 12. La condición de destacado no altera permisos HTTP/WS ni expone estado vivo adicional.
 13. Se mantienen autoridad y elegibilidad de F7-E.3.
 
-- **Estado:** contrato aprobado; implementación aplicada en feature/f7-e4-implementation; validación focalizada pendiente.
+- **Estado:** contrato aprobado; implementación aplicada y aceptada definitivamente el 2026-11-24. Validación focalizada informada: 19 passed, 64 deselected, 1 warning, 0 failed. La regresión global no se declara limpia por fallos históricos de otras áreas.
