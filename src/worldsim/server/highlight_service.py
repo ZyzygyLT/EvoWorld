@@ -60,7 +60,7 @@ def _begin_write_transaction(session) -> None:
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
 
 
-def _eligible_world(session, world_id: int) -> WorldRow:
+def _eligible_world(session, world_id: int, admin_user_id: int) -> WorldRow:
     world = session.scalars(
         select(WorldRow).where(WorldRow.id == world_id).with_for_update()
     ).first()
@@ -78,6 +78,8 @@ def _eligible_world(session, world_id: int) -> WorldRow:
     )
     if owner_exists is None:
         raise WorldNotEligible("world owner account is not valid")
+    if world.owner_user_id == admin_user_id:
+        raise WorldNotEligible("world owner cannot highlight their own world")
 
     # This is deliberately read-only: do not call CheckpointRepository's
     # mutating corruption path and do not invoke recovery.
@@ -113,7 +115,7 @@ def grant_highlight(
     with factory() as session:
         try:
             _begin_write_transaction(session)
-            _eligible_world(session, world_id)
+            _eligible_world(session, world_id, admin_user_id)
 
             current = session.scalars(
                 select(WorldHighlight)
