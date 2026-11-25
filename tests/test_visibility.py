@@ -578,6 +578,28 @@ def test_mine_invalid_value(tmp_path):
     assert r.status_code == 400
 
 
+def test_mine_cursor_is_opaque_and_bound_to_owner_filter(tmp_path):
+    c = _fresh(tmp_path)
+    hdr = _register(c)
+    _make_published_world(c, hdr, name="Mine A")
+    _make_published_world(c, hdr, name="Mine B")
+
+    first = c.get("/api/worlds", params={"mine": "1", "limit": 1}, headers=hdr)
+    assert first.status_code == 200
+    cursor = first.json()["next_cursor"]
+    assert cursor.startswith("h1.")
+
+    second = c.get(
+        "/api/worlds", params={"mine": "1", "limit": 1, "cursor": cursor},
+        headers=hdr,
+    )
+    assert second.status_code == 200
+    assert len(second.json()["worlds"]) == 1
+
+    # The same token cannot be replayed against the public gallery.
+    assert c.get("/api/worlds", params={"limit": 1, "cursor": cursor}).status_code == 400
+
+
 def test_mine_owner_sees_private_and_public(tmp_path):
     c = _fresh(tmp_path)
     hdr = _register(c)
