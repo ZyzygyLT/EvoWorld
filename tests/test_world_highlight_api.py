@@ -21,17 +21,22 @@ _seq = itertools.count(1)
 
 
 @pytest.fixture
-def client(tmp_path: Path):
+def client(tmp_path: Path, monkeypatch):
     engine = create_engine(
         f"sqlite:///{tmp_path / 'highlight-api.db'}",
         connect_args={"check_same_thread": False, "timeout": 10},
     )
     dbmod.ensure_schema(engine)
-    dbmod.SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
-    runnermod.registry = runnermod.RunnerRegistry()
-    appmod.registry = runnermod.registry
-    with TestClient(appmod.app) as test_client:
-        yield test_client
+    monkeypatch.setattr(
+        dbmod, "SessionLocal", sessionmaker(bind=engine, expire_on_commit=False)
+    )
+    registry = runnermod.RunnerRegistry()
+    monkeypatch.setattr(runnermod, "registry", registry)
+    monkeypatch.setattr(appmod, "registry", registry)
+    # Do not enter TestClient's lifespan: it targets the process-global
+    # production engine, while this test intentionally uses only its temp DB.
+    test_client = TestClient(appmod.app)
+    yield test_client
     engine.dispose()
 
 
