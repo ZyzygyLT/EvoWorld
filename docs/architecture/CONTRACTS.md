@@ -1542,7 +1542,8 @@ Registro durable de operaciones globales de desafío (procedencia exigida por §
 - El cursor es opaco y versionado. Su contenido lógico representa la pareja (is_highlighted, id) de la última fila emitida; el cliente no construye ni interpreta esa estructura.
 - El servidor valida versión, tipos, integridad/formato y compatibilidad del cursor con los filtros de consulta. Un cursor inválido o incompatible se rechaza con HTTP 400.
 - La página siguiente continúa por ID descendente dentro del grupo destacado correspondiente y, agotado ese grupo, continúa por el grupo no destacado en ID descendente.
-- Los filtros mine, search y mode forman parte del contexto de consulta. Cambiar cualquiera de ellos exige reiniciar la paginación; no se reutiliza el cursor anterior. Se conservan los límites de página de F7-B.
+- Los parámetros mine, search, mode y limit forman parte del contexto de consulta. Cambiar cualquiera de ellos exige reiniciar la paginación; no se reutiliza el cursor anterior. Se conservan los límites de página de F7-B.
+- No se define un filtro `highlighted=1`: la galería devuelve todos los mundos públicos que cumplen los filtros vigentes y prioriza automáticamente los destacados.
 - Cada página calcula la condición de destacado vigente en el momento de la consulta. No hay snapshot transaccional entre páginas: una concesión, retirada o expiración concurrente puede cambiar el orden y causar duplicados o saltos. El cliente debe reiniciar la consulta para obtener una vista coherente.
 
 ### 18.4 Resoluciones técnicas H1–H3
@@ -1556,7 +1557,7 @@ Registro durable de operaciones globales de desafío (procedencia exigida por §
 - Ningún mundo privado ni eliminado lógicamente aparece en la galería pública.
 - La condición de destacado no modifica la autorización HTTP ni WS, ni crea una suscripción al runner para visitantes.
 - Se mantiene la allowlist de DEC20, ampliada únicamente con el booleano is_highlighted para las proyecciones públicas. No se exponen state_json, owner_user_id, identidad del administrador ni datos operativos internos.
-- El contrato no introduce rankings globales ni modifica el orden o las respuestas privadas de mine=1.
+- El contrato no introduce un filtro `highlighted=1` ni rankings globales, y no modifica el orden o las respuestas privadas de mine=1.
 
 ### 18.6 Criterios de aceptación
 
@@ -1574,4 +1575,4 @@ Registro durable de operaciones globales de desafío (procedencia exigida por §
 12. La condición de destacado no altera permisos HTTP/WS ni expone estado vivo adicional.
 13. Se mantienen autoridad y elegibilidad de F7-E.3.
 
-- **Estado:** contrato aprobado; implementación y pruebas pendientes.
+- **Estado:** contrato aprobado; implementación aplicada en feature/f7-e4-implementation; validación focalizada pendiente.
