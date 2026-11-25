@@ -548,7 +548,9 @@ def list_worlds(
 
     if highlighted is not None:
         if highlighted != "1" or owner_mode:
-            raise HTTPException(400, "highlighted must be '1' and is only available in the public gallery")
+            raise HTTPException(
+                400, "highlighted must be '1' and is only available in the public gallery"
+            )
 
     search_pattern: str | None = None
     normalized_search: str | None = None
