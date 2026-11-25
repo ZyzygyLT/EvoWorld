@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import pytest
@@ -104,6 +105,32 @@ def test_grant_closes_expired_row_without_faking_revocation(highlight_env):
         assert old.revoked_by_admin_user_id is None
         assert new.is_active == 1
         assert session.scalar(select(func.count()).select_from(WorldHighlight)) == 2
+
+
+def test_concurrent_grants_serialize_to_one_active_highlight(highlight_env):
+    _engine, factory, (admin_id, _owner_id, world_id) = highlight_env
+    now = datetime(2026, 7, 1, tzinfo=timezone.utc)
+
+    def attempt(reason):
+        try:
+            return grant_highlight(
+                world_id, admin_id, reason, session_factory=factory, now=now
+            )
+        except ActiveHighlightExists:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(attempt, ["concurrent A", "concurrent B"]))
+
+    assert sum(result is not None for result in results) == 1
+    with factory() as session:
+        active = session.scalars(
+            select(WorldHighlight).where(
+                WorldHighlight.world_id == world_id,
+                WorldHighlight.is_active == 1,
+            )
+        ).all()
+        assert len(active) == 1
 
 
 def test_revoke_is_auditable_and_keeps_history(highlight_env):
