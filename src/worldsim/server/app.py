@@ -804,10 +804,21 @@ def _load_visible_row(world_id: int, authorization: str | None) -> WorldRow:
     return row
 
 
-def _public_ficha(row: WorldRow, user) -> dict:
-    """Bounded public representation (DEC20/§14.4): built EXPLICITLY from
-    the closed allowlist — no model serialization, no field subtraction."""
-    return {
+def _world_is_highlighted(world_id: int) -> bool:
+    now_iso = highlight_service.utc_iso(highlight_service.utc_now())
+    with db.SessionLocal() as db_:
+        return bool(
+            db_.scalar(
+                select(_highlighted_expression(now_iso)).where(WorldRow.id == world_id)
+            )
+        )
+
+
+def _public_ficha(
+    row: WorldRow, user, *, is_highlighted: bool | None = None
+) -> dict:
+    """Bounded public representation (DEC20/§14.4 + DEC-F7E-01)."""
+    out = {
         "id": row.id,
         "name": row.name or f"World {row.seed}",
         "mode": row.mode or "single",
@@ -820,6 +831,9 @@ def _public_ficha(row: WorldRow, user) -> dict:
         "visibility": _visibility(row),
         "mine": _is_owner(row, user),
     }
+    if is_highlighted is not None:
+        out["is_highlighted"] = bool(is_highlighted)
+    return out
 
 
 def _public_detail(row: WorldRow, user) -> dict:
@@ -827,7 +841,7 @@ def _public_detail(row: WorldRow, user) -> dict:
 
     Never includes ``state_json``, ``kingdoms``, ``chronicle``,
     ``battle_heat`` or any field outside the two allowlists above."""
-    out = _public_ficha(row, user)
+    out = _public_ficha(row, user, is_highlighted=_world_is_highlighted(row.id))
     world_block: dict = {}
     try:
         state = json.loads(row.state_json or "{}")
