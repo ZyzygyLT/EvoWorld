@@ -926,3 +926,18 @@ Consolidación de DEC01–DEC21 y DEC-F7B-01…DEC-F7C-19 (F7-C-R1-I, 2026-11-16
 - **Resolución H3 — checkpoint elegible:** la elegibilidad selecciona el checkpoint íntegro más reciente entre los registros con `is_valid=true`: consultar candidatos en orden `sequence DESC`, comparar el SHA-256 del payload almacenado sin modificar filas y aceptar el primero cuyo checksum coincida. Si ninguno coincide, el mundo no es elegible. Un candidato corrupto no se marca como inválido ni se persiste ninguna corrección durante esta evaluación; no se llama a `get_latest_valid_checkpoint()` ni a `RecoveryManager.recover()`.
 - **Estado:** Aprobada / implementada y aceptada definitivamente (2026-11-24). Validación focalizada informada: 19 passed, 64 deselected, 1 warning, 0 failed. La regresión global conserva fallos históricos de otras áreas y no se declara limpia.
 - **Origen:** decisiones confirmadas por el usuario para F7-E.4 (2026-11-24).
+
+
+## DEC-F7E-02 — Cierre global de F7-E (2026-11-24)
+
+- **Decisión:** se declara F7-E cerrada documentalmente y aceptada en el alcance aprobado, compuesto por F7-E.1, F7-E.2-I, F7-E.3 y F7-E.4. F7-E.5 es exclusivamente el cierre documental de la secuencia; no representa una nueva funcionalidad.
+- **Base de aceptación:**
+  - F7-E.1: modelo, vigencia, retirada e historial de destacados.
+  - F7-E.2-I: eliminación lógica mediante `deleted_at`, con retención histórica y reglas de exclusión de mundos eliminados.
+  - F7-E.3: autoridad administrativa y elegibilidad de mundos, con validación no destructiva de checkpoints.
+  - F7-E.4: integración de destacados en las proyecciones públicas de galería/ficha, ordenación y cursor compuesto conforme a DEC-F7E-01.
+  - Las aceptaciones de las subetapas y sus evidencias se mantienen en sus respectivos contratos e informes; esta decisión no sustituye ni amplía esas evidencias.
+- **Límites de verificación:** las pruebas focalizadas informadas para F7-E.3 fueron 24 pruebas SQLite y 2 pruebas PostgreSQL reales, ejecutadas en dos ejecuciones separadas. Para F7-E.4 se informó 19 passed, 64 deselected, 1 warning y 0 failed. Estos resultados no equivalen a una regresión global limpia; no se declara tal cosa.
+- **Fuera de alcance:** F7-D Nivel 2, rankings globales, filtro `highlighted=1), cambios de UI no definidos, restauración o purga de mundos eliminados, alteraciones de DEC19, motor, runners, checkpoints o recuperación fuera de los contratos aprobados. Cualquier ampliación requiere una decisión y autorización independientes.
+- **Estado:** Aprobada / F7-E cerrada documentalmente y aceptada definitivamente (2026-11-24).
+- **Origen:** aceptación explícita del usuario del cierre global documental de F7-E (2026-11-24).
