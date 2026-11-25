@@ -405,7 +405,7 @@ def test_paginated_cursor_is_opaque_and_tamper_evident(tmp_path):
     assert len(second.json()["worlds"]) == 1
     assert second.json()["worlds"][0]["id"] != first.json()["worlds"][0]["id"]
 
-    tampered = cursor[:-1] + ("A" if cursor[-1] != "A" else "B")
+    tampered = cursor[:-5] + ("A" if cursor[-5] != "A" else "B") + cursor[-4:]
     assert c.get("/api/worlds", params={"limit": 1, "cursor": tampered}).status_code == 400
 
 
