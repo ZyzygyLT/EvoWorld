@@ -754,6 +754,7 @@ def _load_row(world_id: int) -> WorldRow:
 PUBLIC_WORLD_FIELDS = (
     "id", "name", "mode", "seed", "months_simulated", "land_pct",
     "created_at", "season_years", "season_over", "visibility", "mine",
+    "is_highlighted",
 )
 #: Base-map render block allowed on the public DETAIL (§14.4).  Note
 #: ``battle_heat``/``state_json`` are NOT part of it.
