@@ -938,6 +938,6 @@ Consolidación de DEC01–DEC21 y DEC-F7B-01…DEC-F7C-19 (F7-C-R1-I, 2026-11-16
   - F7-E.4: integración de destacados en las proyecciones públicas de galería/ficha, ordenación y cursor compuesto conforme a DEC-F7E-01.
   - Las aceptaciones de las subetapas y sus evidencias se mantienen en sus respectivos contratos e informes; esta decisión no sustituye ni amplía esas evidencias.
 - **Límites de verificación:** las pruebas focalizadas informadas para F7-E.3 fueron 24 pruebas SQLite y 2 pruebas PostgreSQL reales, ejecutadas en dos ejecuciones separadas. Para F7-E.4 se informó 19 passed, 64 deselected, 1 warning y 0 failed. Estos resultados no equivalen a una regresión global limpia; no se declara tal cosa.
-- **Fuera de alcance:** F7-D Nivel 2, rankings globales, filtro `highlighted=1), cambios de UI no definidos, restauración o purga de mundos eliminados, alteraciones de DEC19, motor, runners, checkpoints o recuperación fuera de los contratos aprobados. Cualquier ampliación requiere una decisión y autorización independientes.
+- **Fuera de alcance:** F7-D Nivel 2, rankings globales, filtro `highlighted=1`, cambios de UI no definidos, restauración o purga de mundos eliminados, alteraciones de DEC19, motor, runners, checkpoints o recuperación fuera de los contratos aprobados. Cualquier ampliación requiere una decisión y autorización independientes.
 - **Estado:** Aprobada / F7-E cerrada documentalmente y aceptada definitivamente (2026-11-24).
 - **Origen:** aceptación explícita del usuario del cierre global documental de F7-E (2026-11-24).
