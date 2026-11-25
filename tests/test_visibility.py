@@ -456,6 +456,39 @@ def test_highlights_sort_before_newer_unhighlighted_worlds_and_cursor_crosses_gr
     assert second.json()["worlds"][0]["is_highlighted"] is False
 
 
+def test_expired_highlight_is_not_publicly_active_and_get_is_read_only(tmp_path):
+    c = _fresh(tmp_path)
+    hdr = _register(c)
+    world_id = _make_published_world(c, hdr, name="Expired highlight")
+
+    import worldsim.server.db as dbmod_local
+    from worldsim.server.db import WorldHighlight
+
+    with dbmod_local.SessionLocal() as session:
+        admin = session.query(dbmod_local.UserRow).first()
+        session.add(WorldHighlight(
+            world_id=world_id,
+            admin_user_id=admin.id,
+            granted_at="2026-01-01T00:00:00Z",
+            expires_at="2026-02-01T00:00:00Z",
+            reason="expired",
+            is_active=1,
+        ))
+        session.commit()
+
+    response = c.get("/api/worlds")
+    assert response.status_code == 200
+    world = next(item for item in response.json()["worlds"] if item["id"] == world_id)
+    assert world["is_highlighted"] is False
+    assert c.get("/api/worlds", params={"highlighted": "1"}).json()["worlds"] == []
+
+    with dbmod_local.SessionLocal() as session:
+        row = session.query(WorldHighlight).filter_by(world_id=world_id).one()
+        assert row.is_active == 1
+        assert row.revoked_at is None
+        assert row.revoked_by_admin_user_id is None
+
+
 def test_highlight_filter_returns_only_current_highlights(tmp_path):
     c = _fresh(tmp_path)
     hdr = _register(c)
