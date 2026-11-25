@@ -49,6 +49,7 @@ from sqlalchemy.exc import InterfaceError, OperationalError
 from worldsim.data.loaders import load_governments, load_races
 from worldsim.export.state import engine_to_dict
 from worldsim.server import db
+from worldsim.server import highlight_service
 from worldsim.server.db import (
     Base,  # noqa: F401 — referenced by tests as appmod.Base
     ChatRow,
@@ -252,6 +253,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class WorldHighlightRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+    duration_months: int | None = None
+
+
 def _auth_user(authorization: str | None):
     """Resolve 'Bearer <token>' to a user row (None = anonymous)."""
     from worldsim.server import auth as authmod
@@ -296,6 +302,68 @@ def api_logout(authorization: str | None = Header(default=None)) -> dict:
     if authorization and authorization.startswith("Bearer "):
         authmod.logout(authorization[7:].strip())
     return {"ok": True}
+
+
+def _require_highlight_admin(authorization: str | None):
+    user = _auth_user(authorization)
+    if user is None:
+        raise HTTPException(401, "log in as an administrator")
+    if not bool(user.is_admin):
+        raise HTTPException(403, "administrator privileges required")
+    return user
+
+
+@app.post("/api/admin/worlds/{world_id}/highlight", status_code=201)
+def admin_highlight_world(
+    world_id: int,
+    req: WorldHighlightRequest,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    admin = _require_highlight_admin(authorization)
+    if not req.reason.strip():
+        raise HTTPException(400, "reason must not be empty")
+    if req.duration_months is not None and req.duration_months <= 0:
+        raise HTTPException(400, "duration_months must be positive")
+    try:
+        row = highlight_service.grant_highlight(
+            world_id=world_id,
+            admin_user_id=admin.id,
+            reason=req.reason,
+            duration_months=req.duration_months,
+        )
+    except highlight_service.WorldNotEligible as exc:
+        raise HTTPException(400, str(exc)) from None
+    except highlight_service.ActiveHighlightExists as exc:
+        raise HTTPException(409, str(exc)) from None
+    return {"world_highlight_id": row.id}
+
+
+@app.post("/api/admin/worlds/{world_id}/unhighlight")
+def admin_unhighlight_world(
+    world_id: int,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    admin = _require_highlight_admin(authorization)
+    try:
+        highlight_service.revoke_highlight(
+            world_id=world_id,
+            admin_user_id=admin.id,
+        )
+    except highlight_service.NoActiveHighlight:
+        raise HTTPException(404, "no active highlight") from None
+    return {"revoked": True}
+
+
+@app.get("/api/admin/world_highlights/{highlight_id}")
+def admin_get_world_highlight(
+    highlight_id: int,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    _require_highlight_admin(authorization)
+    try:
+        return highlight_service.get_highlight_detail(highlight_id)
+    except highlight_service.HighlightNotFound:
+        raise HTTPException(404, "highlight not found") from None
 
 
 def _build_engine(
