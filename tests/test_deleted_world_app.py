@@ -390,16 +390,17 @@ def test_static_a5_delete_read_remains_unfiltered():
 
 
 def test_static_app_filters_is_none_no_restoration_no_historical_params():
-    """Rule 8 + rule 7 + B3-3 scope: exactly the four ordinary filters,
-    every ``deleted_at`` read is ``.is_(None)``, nothing ever writes
-    ``deleted_at`` (no restoration), and no general historical-access
-    parameter exists anywhere in app.py."""
+    """Rule 8 + rule 7 + B3-3 scope: four original ordinary filters plus
+    the public-highlight eligibility guard; every ``deleted_at`` read is
+    ``.is_(None)``, nothing ever writes it, and no general historical
+    access parameter exists anywhere in app.py."""
     source = APP_SOURCE
     tree = ast.parse(source)
 
-    # exactly the four authorized filters (A1, A2, A4, A6):
-    assert source.count("WorldRow.deleted_at.is_(None)") == 4
-    assert source.count("deleted_at") == 4  # no other mention at all
+    # Four original filters (A1, A2, A4, A6) plus the public-highlight
+    # eligibility guard: private/deleted worlds must never be highlighted.
+    assert source.count("WorldRow.deleted_at.is_(None)") == 5
+    assert source.count("deleted_at") == 5  # no other mention at all
 
     # no general historical-access mechanism:
     for banned in ("include_deleted", "allow_deleted"):
@@ -427,7 +428,7 @@ def test_static_app_filters_is_none_no_restoration_no_historical_params():
         for node in ast.walk(tree)
         if isinstance(node, ast.Attribute) and node.attr == "deleted_at"
     ]
-    assert len(reads) == 4
+    assert len(reads) == 5
     for node in reads:
         parent = parents.get(node)
         assert isinstance(parent, ast.Attribute) and parent.attr == "is_"
