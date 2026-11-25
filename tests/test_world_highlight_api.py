@@ -121,7 +121,15 @@ def test_admin_grant_duplicate_conflict_public_projection_and_revoke(client):
     assert "state_json" not in public_detail.json()
     assert "admin_user_id" not in public_detail.json()
 
-    private_projection = client.get("/api/worlds?mine=1", headers=admin)
+    with client.websocket_connect(f"/api/ws/{world_id}") as socket:
+        public_message = socket.receive_json()
+        assert public_message["type"] == "world"
+        assert public_message["is_highlighted"] is True
+        assert "state_json" not in public_message
+        assert "owner_user_id" not in public_message
+        assert "admin_user_id" not in public_message
+
+    private_projection = client.get("/api/worlds?mine=1", headers=owner)
     assert private_projection.status_code == 200
     owned = next(world for world in private_projection.json()["worlds"] if world["id"] == world_id)
     assert "is_highlighted" not in owned
