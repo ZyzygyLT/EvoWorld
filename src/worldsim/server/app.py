@@ -449,7 +449,6 @@ def _highlight_cursor_fingerprint(
     search: str | None,
     mode: str | None,
     limit: int,
-    highlighted: str | None,
     owner_user_id: int | None = None,
 ) -> str:
     canonical = json.dumps(
@@ -458,7 +457,6 @@ def _highlight_cursor_fingerprint(
             "search": search,
             "mode": mode,
             "limit": limit,
-            "highlighted": highlighted,
             "owner_user_id": owner_user_id,
         },
         sort_keys=True,
@@ -526,7 +524,6 @@ def list_worlds(
     search: str | None = None,
     mode: str | None = None,
     mine: str | None = None,
-    highlighted: str | None = None,
     authorization: str | None = Header(default=None),
 ) -> dict:
     """F7-B gallery with F7-E.4 public highlight ordering and opaque cursor."""
@@ -545,12 +542,6 @@ def list_worlds(
         if limit < 1 or limit > 100:
             raise HTTPException(400, "limit must be between 1 and 100")
         page_limit = limit
-
-    if highlighted is not None:
-        if highlighted != "1" or owner_mode:
-            raise HTTPException(
-                400, "highlighted must be '1' and is only available in the public gallery"
-            )
 
     search_pattern: str | None = None
     normalized_search: str | None = None
@@ -574,7 +565,7 @@ def list_worlds(
     cursor_highlighted: bool | None = None
     fingerprint = _highlight_cursor_fingerprint(
         mine, normalized_search.lower() if normalized_search else None,
-        mode, page_limit, highlighted,
+        mode, page_limit,
         user.id if owner_mode else None,
     )
     if cursor is not None:
@@ -606,8 +597,6 @@ def list_worlds(
             q = select(*columns, highlighted_expr.label("is_highlighted"))
             q = q.order_by(highlighted_expr.desc(), WorldRow.id.desc())
             q = q.where(WorldRow.visibility == "public")
-            if highlighted == "1":
-                q = q.where(highlighted_expr.is_(True))
 
         if search_pattern is not None:
             q = q.where(
