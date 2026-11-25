@@ -816,7 +816,11 @@ def _world_is_highlighted(world_id: int) -> bool:
     with db.SessionLocal() as db_:
         return bool(
             db_.scalar(
-                select(_highlighted_expression(now_iso)).where(WorldRow.id == world_id)
+                select(_highlighted_expression(now_iso)).where(
+                    WorldRow.id == world_id,
+                    WorldRow.visibility == "public",
+                    WorldRow.deleted_at.is_(None),
+                )
             )
         )
 
