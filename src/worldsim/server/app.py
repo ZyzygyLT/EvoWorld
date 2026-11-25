@@ -483,6 +483,8 @@ def _issue_highlight_cursor(
 def _parse_highlight_cursor(token: str, fingerprint: str) -> tuple[bool, int]:
     invalid = HTTPException(400, "invalid or incompatible cursor")
     try:
+        if len(token) > 2048:
+            raise invalid
         parts = token.split(".")
         if len(parts) != 3 or parts[0] != "h1":
             raise invalid
@@ -492,7 +494,11 @@ def _parse_highlight_cursor(token: str, fingerprint: str) -> tuple[bool, int]:
         if not hmac.compare_digest(_unb64u(signature), expected):
             raise invalid
         payload = json.loads(_unb64u(body))
-        if not isinstance(payload, dict) or payload.get("v") != 1:
+        if (
+            not isinstance(payload, dict)
+            or type(payload.get("v")) is not int
+            or payload.get("v") != 1
+        ):
             raise invalid
         highlighted_value = payload.get("is_highlighted")
         world_id = payload.get("id")
