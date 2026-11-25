@@ -48,6 +48,7 @@ _seq = itertools.count(1)
 FICHA_KEYS = {
     "id", "name", "mode", "seed", "months_simulated", "land_pct",
     "created_at", "season_years", "season_over", "visibility", "mine",
+    "is_highlighted",
 }
 MAP_KEYS = {"width", "height", "biome", "elevation", "rivers"}
 
@@ -384,142 +385,103 @@ def test_paginated_cursor_validation(tmp_path):
     hdr = _register(c)
     _make_published_world(c, hdr)
 
-    r = c.get("/api/worlds", params={"cursor": "abc"})
-    assert r.status_code == 400
+    assert c.get("/api/worlds", params={"cursor": "abc"}).status_code == 400
+    assert c.get("/api/worlds", params={"cursor": "1"}).status_code == 400
 
 
-def test_paginated_cursor_zero_rejected(tmp_path):
-    """Cursor cero debe ser rechazado (IDs comienzan en 1)."""
+def test_paginated_cursor_is_opaque_and_tamper_evident(tmp_path):
     c = _fresh(tmp_path)
     hdr = _register(c)
-    _make_published_world(c, hdr)
+    for i in range(3):
+        _make_published_world(c, hdr, i)
 
-    r = c.get("/api/worlds", params={"cursor": 0})
-    assert r.status_code == 400
+    first = c.get("/api/worlds", params={"limit": 1})
+    assert first.status_code == 200
+    cursor = first.json()["next_cursor"]
+    assert cursor.startswith("h1.")
+
+    second = c.get("/api/worlds", params={"limit": 1, "cursor": cursor})
+    assert second.status_code == 200
+    assert len(second.json()["worlds"]) == 1
+    assert second.json()["worlds"][0]["id"] != first.json()["worlds"][0]["id"]
+
+    tampered = cursor[:-1] + ("A" if cursor[-1] != "A" else "B")
+    assert c.get("/api/worlds", params={"limit": 1, "cursor": tampered}).status_code == 400
 
 
-def test_paginated_cursor_negative_rejected(tmp_path):
-    """Cursor negativo debe ser rechazado."""
+def test_paginated_cursor_is_bound_to_filters_and_limit(tmp_path):
     c = _fresh(tmp_path)
     hdr = _register(c)
-    _make_published_world(c, hdr)
+    for i in range(3):
+        _make_published_world(c, hdr, i)
 
-    r = c.get("/api/worlds", params={"cursor": -5})
-    assert r.status_code == 400
+    cursor = c.get("/api/worlds", params={"limit": 1}).json()["next_cursor"]
+    assert c.get("/api/worlds", params={"limit": 2, "cursor": cursor}).status_code == 400
+    assert c.get(
+        "/api/worlds", params={"limit": 1, "search": "other", "cursor": cursor}
+    ).status_code == 400
 
 
-def test_paginated_cursor_positive_valid(tmp_path):
-    """Cursor entero positivo válido se acepta aunque no exista el registro."""
+def test_highlights_sort_before_newer_unhighlighted_worlds_and_cursor_crosses_groups(tmp_path):
     c = _fresh(tmp_path)
     hdr = _register(c)
-    _make_published_world(c, hdr)
+    older_id = _make_published_world(c, hdr, name="Older highlighted")
+    newer_id = _make_published_world(c, hdr, name="Newer ordinary")
 
-    # cursor = 1 (primer id posible): si existe y es público, se filtra
-    r = c.get("/api/worlds", params={"cursor": 1})
-    assert r.status_code == 200, r.text
-    page = r.json()
-    # Con un solo mundo, cursor=1 filtra id < 1 → vacío
-    assert page["worlds"] == []
-    assert page["next_cursor"] is None
+    import worldsim.server.db as dbmod_local
+    from worldsim.server.db import WorldHighlight
+
+    with dbmod_local.SessionLocal() as session:
+        admin = session.query(dbmod_local.UserRow).first()
+        session.add(WorldHighlight(
+            world_id=older_id,
+            admin_user_id=admin.id,
+            granted_at="2026-11-24T00:00:00Z",
+            expires_at=None,
+            reason="contract test",
+            is_active=1,
+        ))
+        session.commit()
+
+    first = c.get("/api/worlds", params={"limit": 1})
+    assert first.status_code == 200
+    page1 = first.json()
+    assert page1["worlds"][0]["id"] == older_id
+    assert page1["worlds"][0]["is_highlighted"] is True
+    cursor = page1["next_cursor"]
+
+    second = c.get("/api/worlds", params={"limit": 1, "cursor": cursor})
+    assert second.status_code == 200
+    assert second.json()["worlds"][0]["id"] == newer_id
+    assert second.json()["worlds"][0]["is_highlighted"] is False
 
 
-def test_paginated_cursor_private_record_valid(tmp_path):
-    """Cursor apuntando a un registro privado es válido como punto de corte."""
+def test_highlight_filter_returns_only_current_highlights(tmp_path):
     c = _fresh(tmp_path)
     hdr = _register(c)
-    # mundo público primero (id menor)
-    pub_id = _make_published_world(c, hdr, name="Pub")
-    # mundo privado después (id mayor)
-    r = c.post("/api/worlds",
-               json={"seed": 99, "width": 80, "height": 50, "name": "Priv"},
-               headers=hdr)
-    assert r.status_code == 200
-    priv_id = r.json()["id"]
-    assert priv_id > pub_id
+    highlighted_id = _make_published_world(c, hdr, name="Highlighted")
+    _make_published_world(c, hdr, name="Ordinary")
 
-    # cursor en id privado: debe filtrar id < priv_id y devolver el público
-    r = c.get("/api/worlds", params={"cursor": priv_id})
-    assert r.status_code == 200
-    page = r.json()
-    assert len(page["worlds"]) == 1
-    assert page["worlds"][0]["id"] == pub_id
+    import worldsim.server.db as dbmod_local
+    from worldsim.server.db import WorldHighlight
 
+    with dbmod_local.SessionLocal() as session:
+        admin = session.query(dbmod_local.UserRow).first()
+        session.add(WorldHighlight(
+            world_id=highlighted_id,
+            admin_user_id=admin.id,
+            granted_at="2026-11-24T00:00:00Z",
+            expires_at=None,
+            reason="contract test",
+            is_active=1,
+        ))
+        session.commit()
 
+    response = c.get("/api/worlds", params={"highlighted": "1"})
+    assert response.status_code == 200
+    assert [world["id"] for world in response.json()["worlds"]] == [highlighted_id]
+    assert response.json()["worlds"][0]["is_highlighted"] is True
 
-def test_paginated_cursor_max_value_accepted(tmp_path):
-    """El máximo entero representable en SQLite INTEGER se acepta."""
-    c = _fresh(tmp_path)
-    hdr = _register(c)
-    wid = _make_published_world(c, hdr)
-
-    max_int64 = 2**63 - 1
-    r = c.get("/api/worlds", params={"cursor": max_int64})
-    assert r.status_code == 200, r.text
-    page = r.json()
-    # cursor muy grande: todos los mundos cumplen id < cursor, se devuelven
-    assert len(page["worlds"]) == 1
-    assert page["worlds"][0]["id"] == wid
-    assert page["next_cursor"] is None
-
-
-def test_paginated_cursor_max_plus_one_rejected(tmp_path):
-    """El máximo + 1 se rechaza con 400 (desbordamiento de INTEGER)."""
-    c = _fresh(tmp_path)
-    hdr = _register(c)
-    _make_published_world(c, hdr)
-
-    max_int64_plus_one = 2**63
-    r = c.get("/api/worlds", params={"cursor": max_int64_plus_one})
-    assert r.status_code == 400
-
-
-def test_paginated_cursor_extremely_large_rejected(tmp_path):
-    """Un entero positivo extremadamente grande se rechaza con 400."""
-    c = _fresh(tmp_path)
-    hdr = _register(c)
-    _make_published_world(c, hdr)
-
-    r = c.get("/api/worlds", params={"cursor": 10**30})
-    assert r.status_code == 400
-
-
-def test_paginated_cursor_deleted_record(tmp_path):
-    """El cursor puede referirse a un ID eliminado; no debe fallar."""
-    c = _fresh(tmp_path)
-    hdr = _register(c)
-    wid = _make_published_world(c, hdr)
-    # delete the world
-    r = c.delete(f"/api/worlds/{wid}", headers=hdr)
-    assert r.status_code == 200
-
-    # cursor pointing to deleted id should still work (returns empty or next)
-    r = c.get("/api/worlds", params={"cursor": wid})
-    assert r.status_code == 200
-    page = r.json()
-    assert page["worlds"] == []
-    assert page["next_cursor"] is None
-
-
-def test_paginated_cursor_private_record(tmp_path):
-    """El cursor puede referirse a un ID privado; se filtra por visibility."""
-    c = _fresh(tmp_path)
-    hdr = _register(c)
-    # create a public world first (lower id)
-    pub_id = _make_published_world(c, hdr, name="Pub")
-    # create a private world after (higher id)
-    r = c.post("/api/worlds",
-               json={"seed": 99, "width": 80, "height": 50, "name": "Priv"},
-               headers=hdr)
-    assert r.status_code == 200
-    priv_id = r.json()["id"]
-    assert priv_id > pub_id
-
-    # cursor at private id: should skip it and return public (id < priv_id)
-    r = c.get("/api/worlds", params={"cursor": priv_id})
-    assert r.status_code == 200
-    page = r.json()
-    assert len(page["worlds"]) == 1
-    assert page["worlds"][0]["id"] == pub_id
 
 
 def test_paginated_search_exact(tmp_path):
