@@ -110,7 +110,14 @@ def grant_highlight(
     factory = session_factory or db.SessionLocal
     instant = now or utc_now()
     granted_at = utc_iso(instant)
-    expires_at = utc_iso(add_calendar_months(instant, duration_months)) if duration_months is not None else None
+    expires_at = None
+    if duration_months is not None:
+        if type(duration_months) is not int or duration_months <= 0:
+            raise ValueError("duration_months must be a positive integer")
+        try:
+            expires_at = utc_iso(add_calendar_months(instant, duration_months))
+        except (OverflowError, ValueError):
+            raise ValueError("duration_months exceeds the supported calendar range") from None
 
     with factory() as session:
         try:
