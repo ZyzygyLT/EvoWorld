@@ -941,3 +941,12 @@ Consolidación de DEC01–DEC21 y DEC-F7B-01…DEC-F7C-19 (F7-C-R1-I, 2026-11-16
 - **Fuera de alcance:** F7-D Nivel 2, rankings globales, filtro `highlighted=1`, cambios de UI no definidos, restauración o purga de mundos eliminados, alteraciones de DEC19, motor, runners, checkpoints o recuperación fuera de los contratos aprobados. Cualquier ampliación requiere una decisión y autorización independientes.
 - **Estado:** Aprobada / F7-E cerrada documentalmente y aceptada definitivamente (2026-11-24).
 - **Origen:** aceptación explícita del usuario del cierre global documental de F7-E (2026-11-24).
+
+
+## DEC-F7D-20 — Retención del desafío ante eliminación del organizador (2026-11-24)
+
+- **Decisión:** la FK `challenges.organizer_user_id` hacia `users.id` usa `ON DELETE RESTRICT` (o el comportamiento equivalente `NO ACTION` del motor). El borrado físico de una cuenta organizadora no puede borrar ni dejar huérfano el desafío.
+- **Justificación:** los desafíos pueden contener participantes, resultados y registros durables de procedencia. La retención histórica definida en DEC-F7D-16 y el registro no-cascadable de `challenge_operations` requieren impedir una cascada destructiva desde la cuenta organizadora.
+- **Contrato:** la FK sigue siendo obligatoria y no nula. Si existen desafíos asociados, el borrado físico del usuario se rechaza; cualquier anonimización o desvinculación deberá definirse mediante un procedimiento separado, explícito y auditable, sin destruir la historia competitiva.
+- **Restricciones:** no usar `ON DELETE CASCADE` en esta FK. La prueba de esquema debe exigir RESTRICT/NO ACTION. Esta decisión no cambia la identidad competitiva ni los permisos de organizador.
+- **Estado:** Aprobada por autorización del usuario (2026-11-24).
