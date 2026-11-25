@@ -448,6 +448,7 @@ def _highlight_cursor_fingerprint(
     mode: str | None,
     limit: int,
     highlighted: str | None,
+    owner_user_id: int | None = None,
 ) -> str:
     canonical = json.dumps(
         {
@@ -456,6 +457,7 @@ def _highlight_cursor_fingerprint(
             "mode": mode,
             "limit": limit,
             "highlighted": highlighted,
+            "owner_user_id": owner_user_id,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -569,6 +571,7 @@ def list_worlds(
     fingerprint = _highlight_cursor_fingerprint(
         mine, normalized_search.lower() if normalized_search else None,
         mode, page_limit, highlighted,
+        user.id if owner_mode else None,
     )
     if cursor is not None:
         cursor_highlighted, cursor_id = _parse_highlight_cursor(cursor, fingerprint)
