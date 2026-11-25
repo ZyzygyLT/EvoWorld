@@ -74,7 +74,9 @@ def test_grant_uses_newest_intact_checkpoint_without_mutating_candidates(highlig
         ).all()
         assert [checkpoint.is_valid for checkpoint in checkpoints] == [1, 1]
         assert checkpoints[0].checksum == hashlib.sha256(checkpoints[0].payload).hexdigest()
-        assert session.scalar(select(WorldHighlight.id).where(WorldHighlight.id == row.id)) == row.id
+        assert session.scalar(
+            select(WorldHighlight.id).where(WorldHighlight.id == row.id)
+        ) == row.id
 
 
 def test_grant_rejects_existing_unexpired_highlight(highlight_env):
@@ -147,7 +149,9 @@ def test_revoke_is_auditable_and_keeps_history(highlight_env):
     assert revoked.revoked_at == "2026-04-02T00:00:00Z"
     assert revoked.revoked_by_admin_user_id == admin_id
     with factory() as session:
-        assert session.scalar(select(WorldHighlight.id).where(WorldHighlight.id == granted.id)) == granted.id
+        assert session.scalar(
+            select(WorldHighlight.id).where(WorldHighlight.id == granted.id)
+        ) == granted.id
 
 
 @pytest.mark.parametrize(
