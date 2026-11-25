@@ -150,6 +150,12 @@ def test_admin_grant_duplicate_conflict_public_projection_and_revoke(client):
     assert detail.json()["is_active"] is False
     assert detail.json()["revoked_by_admin_user_id"] is not None
 
+    repeated_revoke = client.post(
+        f"/api/admin/worlds/{world_id}/unhighlight",
+        headers=admin,
+    )
+    assert repeated_revoke.status_code == 404
+
 
 def test_highlight_admin_authorization_and_duration_validation(client):
     ordinary = _register(client)
@@ -176,6 +182,13 @@ def test_highlight_admin_authorization_and_duration_validation(client):
         json={"reason": "test", "duration_months": 0},
     )
     assert invalid_duration.status_code == 400
+
+    negative_duration = client.post(
+        f"/api/admin/worlds/{world_id}/highlight",
+        headers=admin,
+        json={"reason": "test", "duration_months": -1},
+    )
+    assert negative_duration.status_code == 400
 
     empty_reason = client.post(
         f"/api/admin/worlds/{world_id}/highlight",
