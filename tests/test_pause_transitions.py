@@ -128,6 +128,12 @@ def _status(db, wid: int = W_A) -> str | None:
     return None if row is None else row.status
 
 
+def _deleted_at(db, wid: int = W_A):
+    with db() as s:
+        row = s.get(WorldRow, wid)
+    return None if row is None else row.deleted_at
+
+
 def _set_status(db, wid: int, status: str) -> None:
     with db() as s:
         s.get(WorldRow, wid).status = status
@@ -724,7 +730,10 @@ def test_14_eliminacion_concurrente(db, registry, runner, coord):
         gate2.release.set()
         with pytest.raises(WorldNotFoundError):
             await pause_task  # la fila ya no existe: nada que aplicar
-        assert _status(db) is None  # el mundo quedó eliminado
+        # DEC10/F7-E.2-I: eliminación lógica; se conserva la fila y su
+        # último estado, pero queda marcada y fuera del registro operativo.
+        assert _status(db) == "paused"
+        assert _deleted_at(db) is not None
         assert registry.get_existing(W_A) is None
         assert runner.state is RunnerState.CLOSED  # protocolo DEC10 intacto
         assert coord._writes == set()
