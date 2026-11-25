@@ -1228,7 +1228,7 @@ F7-D implementa **desafíos con semillas comunes**: un desafío congela una conf
 | Columna | Tipo | Descripción |
 |---|---|---|
 | `id` | INTEGER PRIMARY KEY AUTOINCREMENT | Identificador del desafío |
-| `organizer_user_id` | INTEGER, FK a `users.id`, no nulo | Cuenta organizadora (Bearer `user_id`) |
+| `organizer_user_id` | INTEGER, FK a `users.id`, no nulo, `ON DELETE RESTRICT` / `NO ACTION` | Cuenta organizadora (Bearer `user_id`); impide borrar físicamente la cuenta mientras existan desafíos vinculados |
 | `name` | VARCHAR | Nombre del desafío |
 | `config_json` | JSON | Configuración inmutable y versionada (seed, dimensiones, motor, reglas, duración) |
 | `rules_version` | VARCHAR | Versión de reglas competitivas aplicables |
@@ -1237,6 +1237,8 @@ F7-D implementa **desafíos con semillas comunes**: un desafío congela una conf
 | `created_at` | String, ISO 8601 UTC | Momento de creación |
 | `closed_at` | String, ISO 8601 UTC, nulo | Cierre de inscripciones |
 | `completed_at` | String, ISO 8601 UTC, nulo | Finalización del desafío |
+
+La FK `challenges.organizer_user_id` no usa `ON DELETE CASCADE`: el borrado físico de la cuenta organizadora se rechaza mientras exista el desafío. Cualquier anonimización o desvinculación deberá definirse mediante un procedimiento separado y auditable, sin destruir participantes, resultados ni procedencia (DEC-F7D-20).
 
 #### Tabla `challenge_participants`
 
