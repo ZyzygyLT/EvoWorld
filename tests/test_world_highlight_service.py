@@ -324,3 +324,23 @@ def test_checkpoint_verification_preserves_all_candidate_fields(highlight_env):
         session_factory=factory, now=datetime(2026, 8, 6, tzinfo=timezone.utc),
     )
     assert snapshot() == before
+
+
+def test_grant_never_calls_mutating_checkpoint_or_recovery_paths(highlight_env, monkeypatch):
+    from worldsim.server.recovery_manager import RecoveryManager
+    from worldsim.server.repository import CheckpointRepository
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("highlight eligibility must remain read-only")
+
+    monkeypatch.setattr(
+        CheckpointRepository, "get_latest_valid_checkpoint", forbidden
+    )
+    monkeypatch.setattr(RecoveryManager, "recover", forbidden)
+
+    _engine, factory, (admin_id, _owner_id, world_id) = highlight_env
+    row = grant_highlight(
+        world_id, admin_id, "strictly read-only validation",
+        session_factory=factory, now=datetime(2026, 8, 7, tzinfo=timezone.utc),
+    )
+    assert row.is_active == 1
