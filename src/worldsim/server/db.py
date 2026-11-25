@@ -256,6 +256,44 @@ class WorldCheckpoint(Base):
     checkpoint_version = Column(Integer, nullable=False, default=2, server_default="2")
 
 
+class WorldHighlight(Base):
+    """Auditable grant/revocation history for a world's featured status."""
+
+    __tablename__ = "world_highlights"
+    __table_args__ = (
+        CheckConstraint("is_active IN (0, 1)", name="ck_world_highlights_is_active"),
+        ForeignKeyConstraint(
+            ["world_id"], ["worlds.id"], ondelete="RESTRICT",
+            name="fk_world_highlights_world",
+        ),
+        Index("ix_world_highlights_world_id", "world_id"),
+        Index(
+            "uq_world_highlights_active",
+            "world_id",
+            unique=True,
+            sqlite_where=text("is_active = 1"),
+            postgresql_where=text("is_active = 1"),
+        ),
+        Index(
+            "ix_world_highlights_active_expiry",
+            "is_active",
+            "expires_at",
+            sqlite_where=text("is_active = 1"),
+            postgresql_where=text("is_active = 1"),
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    world_id = Column(Integer, nullable=False)
+    admin_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    granted_at = Column(String, nullable=False)
+    expires_at = Column(String, nullable=True)
+    reason = Column(Text, nullable=False)
+    is_active = Column(Integer, nullable=False, default=1, server_default="1")
+    revoked_at = Column(String, nullable=True)
+    revoked_by_admin_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+
 
 # Persistence: sqlite by default; set WORLDSIM_DB to any SQLAlchemy URL to
 # switch (e.g. postgresql+psycopg://user:pass@host/worldsim for PostgreSQL).
