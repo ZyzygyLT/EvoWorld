@@ -59,7 +59,7 @@ Prioridad P1: completar si se busca cobertura administrativa integral.
 ## 4. Cobertura por entorno
 
 - SQLite: existe prueba concurrente de concesión con dos workers y base temporal.
-- PostgreSQL: la implementación usa `SELECT ... FOR UPDATE`, pero la batería inspeccionada no acredita concurrencia de F7-E.3 en PostgreSQL.
+- PostgreSQL: se añadieron pruebas de concurrencia real en `tests/test_world_highlight_postgresql.py`; su ejecución sigue pendiente de configurar `EVOWORLD_TEST_POSTGRES_URL`.
 - No se debe inferir que una prueba SQLite demuestra el comportamiento de bloqueo de PostgreSQL.
 - Las pruebas PostgreSQL de migraciones existentes no sustituyen las pruebas de concurrencia del servicio de destacados.
 - Las pruebas de API usan TestClient y SQLite temporal; no constituyen evidencia de despliegue ni de concurrencia entre procesos.
@@ -69,7 +69,7 @@ Prioridad P1: completar si se busca cobertura administrativa integral.
 1. Ejecutar primero los tests existentes de servicio, API y esquema para establecer línea base.
 2. Incorporar E3-P01 a E3-P08 como pruebas de dominio/servicio.
 3. Incorporar E3-P11 a E3-P16 como pruebas API/servicio según corresponda.
-4. Preparar entorno PostgreSQL aislado y ejecutar E3-P09 y E3-P10; no simular PostgreSQL con SQLite.
+4. Ejecutar `tests/test_world_highlight_postgresql.py` con `EVOWORLD_TEST_POSTGRES_URL` apuntando exclusivamente a la base `evoworld_test`; el fixture crea un esquema aleatorio por test y elimina únicamente ese esquema. No simular PostgreSQL con SQLite.
 5. Ejecutar regresión focalizada F7-E y reportar por separado cualquier fallo preexistente fuera del alcance.
 
 No ejecutar ni alterar tests, fixtures, esquema o datos hasta recibir autorización específica para la fase de implementación de pruebas.
@@ -102,3 +102,19 @@ E3-P03 ya estaba cubierto por `test_ineligible_world_is_rejected` con estado `cl
 **Pendiente de entorno:** E3-P09 y E3-P10 requieren PostgreSQL real y una base de integración exclusiva, aislada y desechable. No se añadieron pruebas que puedan conectarse accidentalmente a una base compartida o de producción. Antes de implementarlas se debe proporcionar/configurar un DSN explícitamente dedicado a tests y definir su política de creación/limpieza.
 
 **Estado de ejecución:** las pruebas nuevas todavía no se han ejecutado. Los commits de edición documental/código de pruebas no constituyen evidencia de aprobación. F7-E.3 permanece sin aceptación final hasta ejecutar la batería y resolver o aceptar expresamente la limitación PostgreSQL.
+
+
+## 8. Implementación PostgreSQL P09/P10 — 2026-11-24
+
+Se añadió `tests/test_world_highlight_postgresql.py`, sin cambios en código de producción:
+
+- E3-P09: dos concesiones concurrentes para el mismo mundo; se exige exactamente una concesión exitosa y un conflicto, con una única fila activa.
+- E3-P10: concesión y retirada concurrentes sobre el mismo mundo, partiendo de un destacado activo; se comprueba que la retirada conserva actor e instante, que no se pierde historial y que nunca queda más de una fila activa. Se aceptan los dos órdenes seriales posibles.
+- Cada prueba utiliza un esquema PostgreSQL aleatorio e independiente.
+- El fixture exige `EVOWORLD_TEST_POSTGRES_URL`, valida el motor PostgreSQL y rechaza cualquier base cuyo nombre no sea exactamente `evoworld_test`.
+- El fixture no lee `WORLDSIM_DB`; elimina exclusivamente el esquema aleatorio que creó.
+- El motor de prueba se libera antes de ejecutar la limpieza del esquema.
+
+**Commit de implementación:** `4fa24626d2a069fd142ad2b6323936ced713107d`.
+
+**Estado:** implementado, todavía no ejecutado. La ejecución y validación de resultados siguen pendientes; no se declara P09/P10 aprobados ni F7-E.3 aceptada.
