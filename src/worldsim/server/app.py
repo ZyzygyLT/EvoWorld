@@ -562,18 +562,13 @@ def list_worlds(
     cursor_id: int | None = None
     cursor_highlighted: bool | None = None
     fingerprint = _highlight_cursor_fingerprint(
-        mine, normalized_search, mode, page_limit, highlighted
+        mine, normalized_search.lower() if normalized_search else None,
+        mode, page_limit, highlighted,
     )
     if cursor is not None:
-        if owner_mode:
-            try:
-                cursor_id = int(cursor)
-            except (TypeError, ValueError):
-                raise HTTPException(400, "cursor must be an integer")
-            if cursor_id <= 0 or cursor_id > 2**63 - 1:
-                raise HTTPException(400, "cursor must be a positive signed 64-bit integer")
-        else:
-            cursor_highlighted, cursor_id = _parse_highlight_cursor(cursor, fingerprint)
+        cursor_highlighted, cursor_id = _parse_highlight_cursor(cursor, fingerprint)
+        if owner_mode and cursor_highlighted:
+            raise HTTPException(400, "incompatible cursor for owner gallery")
 
     now_iso = highlight_service.utc_iso(highlight_service.utc_now())
     highlighted_expr = _highlighted_expression(now_iso)
@@ -636,7 +631,7 @@ def list_worlds(
     if not has_next:
         next_cursor = None
     elif owner_mode:
-        next_cursor = worlds_rows[-1].id
+        next_cursor = _issue_highlight_cursor(False, worlds_rows[-1].id, fingerprint)
     else:
         last = worlds_rows[-1]
         next_cursor = _issue_highlight_cursor(
