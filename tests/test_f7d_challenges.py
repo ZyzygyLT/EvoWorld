@@ -424,6 +424,9 @@ def test_f7d_enroll_participant(tmp_path):
     assert p.user_id == 2
     assert p.state == "inscrito"
     assert p.world_id is None
+    assert p.public_alias.startswith("participant-")
+    assert len(p.public_alias) == len("participant-") + 32
+    assert p.public_alias != str(p.user_id)
     eng.dispose()
 
 

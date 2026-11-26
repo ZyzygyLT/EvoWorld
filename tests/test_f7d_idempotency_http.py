@@ -334,6 +334,79 @@ def test_b_enroll_retry_same_response(client):
     assert n_participants == 1
 
 
+def test_enroll_persists_opaque_alias_and_public_results_hide_internal_ids(client):
+    organizer_headers, _ = _register(client, "aliasorganizer")
+    participant_headers, participant_id = _register(client, "aliasparticipant")
+    cid = _create_challenge(client, organizer_headers, "Opaque Alias")
+    _publish_challenge(client, organizer_headers, cid)
+
+    enroll_key = "opaque-alias-enroll"
+    enrolled = client.post(
+        f"/api/challenges/{cid}/enroll",
+        headers={**participant_headers, "Idempotency-Key": enroll_key},
+        json={"client_idempotency_key": enroll_key},
+    )
+    assert enrolled.status_code == 200, enrolled.text
+
+    with dbmod.SessionLocal() as s:
+        participant = s.execute(
+            text(
+                "SELECT public_alias FROM challenge_participants "
+                "WHERE challenge_id = :cid AND user_id = :uid"
+            ),
+            {"cid": cid, "uid": participant_id},
+        ).one()
+        alias = participant.public_alias
+        assert alias.startswith("participant-")
+        assert str(participant_id) not in alias
+        s.execute(
+            text(
+                "UPDATE challenge_participants SET state = 'finalizado', "
+                "result_json = :result, result_status = 'confirmed', "
+                "result_verified = 1 WHERE challenge_id = :cid AND user_id = :uid"
+            ),
+            {
+                "result": json.dumps({
+                    "total_population": 100,
+                    "wars_won": 2,
+                    "tech_level": 3,
+                    "influence_max": 4,
+                }),
+                "cid": cid,
+                "uid": participant_id,
+            },
+        )
+        s.execute(
+            text("UPDATE challenges SET state = 'completed' WHERE id = :cid"),
+            {"cid": cid},
+        )
+        s.commit()
+
+    # Retry must preserve the exact persisted alias; it must not mint a new one.
+    retry = client.post(
+        f"/api/challenges/{cid}/enroll",
+        headers={**participant_headers, "Idempotency-Key": enroll_key},
+        json={"client_idempotency_key": enroll_key},
+    )
+    assert retry.status_code == 200, retry.text
+    with dbmod.SessionLocal() as s:
+        persisted_alias = s.execute(
+            text(
+                "SELECT public_alias FROM challenge_participants "
+                "WHERE challenge_id = :cid AND user_id = :uid"
+            ),
+            {"cid": cid, "uid": participant_id},
+        ).scalar_one()
+    assert persisted_alias == alias
+
+    public_response = client.get(f"/api/challenges/{cid}/results")
+    assert public_response.status_code == 200, public_response.text
+    public_participant = public_response.json()["participants"][0]
+    assert public_participant["alias"] == alias
+    assert "user_id" not in public_participant
+    assert "world_id" not in public_participant
+
+
 def test_b_dispute_retry_same_response(client):
     headers, uid = _register(client)
     cid = _create_challenge(client, headers, "B Dispute")
@@ -346,6 +419,7 @@ def test_b_dispute_retry_same_response(client):
             challenge_id=cid,
             user_id=uid,
             world_id=None,
+            public_alias=f"participant-{uid}-dispute-test",
             state="inscrito",
             joined_at=s.execute(text("SELECT CURRENT_TIMESTAMP")).scalar(),
         )

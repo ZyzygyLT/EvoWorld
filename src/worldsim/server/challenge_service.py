@@ -631,6 +631,7 @@ class ChallengeService:
             challenge_id=challenge_id,
             user_id=user_id,
             world_id=0,  # Sentinel: "sin mundo asignado"; se crea en preparing
+            public_alias=f"participant-{uuid.uuid4().hex}",
             state="inscrito",
             joined_at=self._now(),
         )
