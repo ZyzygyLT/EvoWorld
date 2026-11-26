@@ -515,6 +515,15 @@ def _f7d_schema_is_current(conn, table: str) -> bool:
     if any(by_name[name]["nullable"] for name in required_not_null):
         return False
 
+    required_nullable = {
+        "challenges": {"closed_at", "completed_at"},
+        "challenge_participants": {"world_id", "result_json", "result_status"},
+        "challenge_operations": {"outcome"},
+        "challenge_creation_requests": set(),
+    }[table]
+    if any(not by_name[name]["nullable"] for name in required_nullable):
+        return False
+
     check_names = {
         item.get("name") for item in inspector.get_check_constraints(table)
     }
