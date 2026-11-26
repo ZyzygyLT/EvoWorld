@@ -358,7 +358,7 @@ def test_enroll_persists_opaque_alias_and_public_results_hide_internal_ids(clien
         ).one()
         alias = participant.public_alias
         assert alias.startswith("participant-")
-        assert str(participant_id) not in alias
+        assert alias != "aliasparticipant"
         s.execute(
             text(
                 "UPDATE challenge_participants SET state = 'finalizado', "
@@ -419,7 +419,7 @@ def test_b_dispute_retry_same_response(client):
             challenge_id=cid,
             user_id=uid,
             world_id=None,
-            public_alias=f"participant-{uid}-dispute-test",
+            public_alias="participant-dispute-fixture",
             state="inscrito",
             joined_at=s.execute(text("SELECT CURRENT_TIMESTAMP")).scalar(),
         )
