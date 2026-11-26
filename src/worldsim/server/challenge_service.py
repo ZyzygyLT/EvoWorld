@@ -798,9 +798,8 @@ class ChallengeService:
         config = json.loads(challenge.config_json)
 
         for participant in participants:
-            # F7-E.2 (B3-5): tratar world_id=0 como "sin mundo asignado".
-            # world_id > 0 significa que ya tiene un mundo (activo o eliminado).
-            # world_id = 0 significa que necesita mundo nuevo.
+            # NULL es el estado normal "sin mundo asignado"; 0 se acepta
+            # únicamente como sentinel legacy. Un ID positivo ya está asignado.
             if participant.world_id is not None and participant.world_id != 0:
                 # F7-E.2 (B3-5): verificar el mundo asignado
                 row = session.get(WorldRow, participant.world_id)
