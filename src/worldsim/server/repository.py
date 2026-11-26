@@ -45,6 +45,7 @@ from .db import (
     ChallengeRow,
     ChallengeParticipantRow,
     ChallengeOperationRow,
+    ChallengeCreationRequestRow,
 )
 
 
@@ -1081,17 +1082,42 @@ class ChallengeRepository:
         s = self._session
         return s.get(ChallengeRow, challenge_id)
 
-    def get_challenge_by_organizer_and_key(
-        self, organizer_user_id: int, client_idempotency_key: str
-    ) -> ChallengeRow | None:
-        """Busca un desafío por organizador + clave de idempotencia."""
+    def get_challenge_creation_request(
+        self, actor_user_id: int, client_idempotency_key: str
+    ) -> ChallengeCreationRequestRow | None:
+        """Busca la identidad idempotente de creación por actor + clave."""
         s = self._session
         return s.scalars(
-            select(ChallengeRow).where(
-                ChallengeRow.organizer_user_id == organizer_user_id,
-                ChallengeRow.client_idempotency_key == client_idempotency_key,
+            select(ChallengeCreationRequestRow).where(
+                ChallengeCreationRequestRow.actor_user_id == actor_user_id,
+                ChallengeCreationRequestRow.client_idempotency_key
+                == client_idempotency_key,
             )
         ).first()
+
+    def record_challenge_creation_request(
+        self,
+        actor_user_id: int,
+        client_idempotency_key: str,
+        request_hash: str,
+        challenge_id: int,
+    ) -> ChallengeCreationRequestRow:
+        """Registra la clave de creación en la misma transacción del desafío.
+
+        La restricción UNIQUE(actor_user_id, client_idempotency_key) arbitra
+        las carreras concurrentes. El llamador controla commit/rollback.
+        """
+        s = self._session
+        row = ChallengeCreationRequestRow(
+            actor_user_id=actor_user_id,
+            client_idempotency_key=client_idempotency_key,
+            request_hash=request_hash,
+            challenge_id=challenge_id,
+            created_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+        )
+        s.add(row)
+        s.flush()
+        return row
 
     def get_challenge_operation(
         self, challenge_id: int, actor_user_id: int, client_idempotency_key: str
