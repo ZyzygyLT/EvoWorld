@@ -82,8 +82,7 @@ def _seq():
 
 
 def _insert_challenge(eng, organizer_user_id=1, name="Test",
-                      config_json=None, client_idempotency_key="idem:test",
-                      request_hash=None):
+                      config_json=None, request_hash=None):
     """Inserta un desafío directamente en la DB."""
     if config_json is None:
         config_json = _challenge_json()
@@ -109,8 +108,6 @@ def _insert_challenge(eng, organizer_user_id=1, name="Test",
             duration_ticks=30,
             state="draft",
             created_at=_now(),
-            client_idempotency_key=client_idempotency_key,
-            request_hash=request_hash,
         )
         s.add(challenge)
         s.commit()
