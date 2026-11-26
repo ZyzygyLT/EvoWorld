@@ -56,6 +56,7 @@ def _participant(env, challenge_id, user_id, world_id, *,
                 if result_verified is None else result_verified
             ),
             state="activo",
+            joined_at="2026-11-23 00:00:00",
         )
         session.add(row)
         session.commit()
