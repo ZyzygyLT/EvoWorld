@@ -123,8 +123,8 @@ def _insert_participant(eng, challenge_id, user_id, world_id=0):
         s.execute(
             text(
                 "INSERT INTO challenge_participants "
-                "(challenge_id, user_id, world_id, public_alias, result_json, result_status, result_verified, state) "
-                "VALUES (:c, :u, :w, :p, :r, :st, :sv, :stt)"
+                "(challenge_id, user_id, world_id, public_alias, result_json, result_status, result_verified, state, joined_at) "
+                "VALUES (:c, :u, :w, :p, :r, :st, :sv, :stt, :joined)"
             ),
             {
                 "c": challenge_id,
@@ -135,6 +135,7 @@ def _insert_participant(eng, challenge_id, user_id, world_id=0):
                 "st": "persisted",
                 "sv": 0,
                 "stt": "inscrito",
+                "joined": _now(),
             },
         )
         s.commit()
