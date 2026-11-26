@@ -264,6 +264,55 @@ def test_f7d_create_challenge_idempotency_conflict(tmp_path):
     eng.dispose()
 
 
+def test_f7d_create_request_hash_defaults_to_challenge_id_zero(tmp_path):
+    """El hash fallback usa la misma identidad canónica que HTTP (challenge_id=0)."""
+    from worldsim.server.challenge_service import ChallengeParams
+
+    eng = _fresh_engine(tmp_path)
+    raw = sqlite3.connect(eng.url.database)
+    _seed_users(raw)
+    raw.commit()
+    raw.close()
+
+    service = _make_service(eng)
+    config = _challenge_json()
+    service.create_challenge(
+        organizer_user_id=1,
+        name="Hash canónico",
+        config_json=config,
+        rules_version="1.0",
+        duration_ticks=30,
+        client_idempotency_key="idem:canonical:1",
+    )
+
+    expected = ChallengeService._compute_request_hash(
+        ChallengeParams(
+            challenge_id=0,
+            organizer_user_id=1,
+            name="Hash canónico",
+            config_json=config,
+            rules_version="1.0",
+            duration_ticks=30,
+        )
+    )
+    with eng.connect() as conn:
+        stored = conn.execute(
+            text(
+                "SELECT request_hash FROM challenge_creation_requests "
+                "WHERE actor_user_id = 1 AND client_idempotency_key = 'idem:canonical:1'"
+            )
+        ).scalar_one()
+        operation_hash = conn.execute(
+            text(
+                "SELECT request_hash FROM challenge_operations "
+                "WHERE operation = 'create' AND client_idempotency_key = 'idem:canonical:1'"
+            )
+        ).scalar_one()
+    assert stored == expected
+    assert operation_hash == expected
+    eng.dispose()
+
+
 def test_f7d_publish_challenge(tmp_path):
     """Publicar desafío (draft → published)."""
     eng = _fresh_engine(tmp_path)
