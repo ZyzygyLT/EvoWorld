@@ -140,6 +140,18 @@ def test_a_create_first_request(client):
     assert ops[0]["outcome"] == "draft"
     assert _state(cid) == "draft"
 
+    with dbmod.SessionLocal() as s:
+        creation = s.execute(
+            text(
+                "SELECT actor_user_id, client_idempotency_key, request_hash, challenge_id "
+                "FROM challenge_creation_requests"
+            )
+        ).mappings().one()
+    assert creation["actor_user_id"] == uid
+    assert creation["client_idempotency_key"] == "create-a"
+    assert creation["challenge_id"] == cid
+    assert creation["request_hash"] == ops[0]["request_hash"]
+
 
 def test_a_publish_first_request(client):
     headers, uid = _register(client)
@@ -223,6 +235,67 @@ def test_b_create_retry_same_response(client):
         ).scalar()
     assert n_challenges == 1
     assert len(_ops_of(cid, "create")) == 1
+
+
+def test_c_create_same_key_different_payload_conflict_409(client):
+    headers, _ = _register(client)
+    key = "create-payload-conflict"
+    first = client.post(
+        "/api/challenges",
+        json=_challenge_body("Original payload"),
+        headers={**headers, "Idempotency-Key": key},
+    )
+    assert first.status_code == 200, first.text
+
+    second = client.post(
+        "/api/challenges",
+        json=_challenge_body("Changed payload"),
+        headers={**headers, "Idempotency-Key": key},
+    )
+    assert second.status_code == 409, second.text
+    assert "idempotency_conflict" in second.text
+
+    with dbmod.SessionLocal() as s:
+        assert s.execute(text("SELECT COUNT(*) FROM challenges")).scalar() == 1
+        assert s.execute(
+            text("SELECT COUNT(*) FROM challenge_creation_requests")
+        ).scalar() == 1
+        assert s.execute(
+            text("SELECT COUNT(*) FROM challenge_operations WHERE operation = 'create'")
+        ).scalar() == 1
+
+
+def test_e_create_same_key_different_actors_are_independent(client):
+    h1, uid1 = _register(client, "create_actor_one")
+    h2, uid2 = _register(client, "create_actor_two")
+    key = "shared-create-key"
+    body = _challenge_body("Same semantic payload")
+
+    r1 = client.post(
+        "/api/challenges", json=body,
+        headers={**h1, "Idempotency-Key": key},
+    )
+    r2 = client.post(
+        "/api/challenges", json=body,
+        headers={**h2, "Idempotency-Key": key},
+    )
+    assert r1.status_code == 200, r1.text
+    assert r2.status_code == 200, r2.text
+    assert r1.json()["id"] != r2.json()["id"]
+
+    with dbmod.SessionLocal() as s:
+        rows = s.execute(
+            text(
+                "SELECT actor_user_id, client_idempotency_key, challenge_id "
+                "FROM challenge_creation_requests ORDER BY actor_user_id"
+            )
+        ).mappings().all()
+    assert len(rows) == 2
+    assert {row["actor_user_id"] for row in rows} == {uid1, uid2}
+    assert {row["client_idempotency_key"] for row in rows} == {key}
+    assert {row["challenge_id"] for row in rows} == {
+        r1.json()["id"], r2.json()["id"]
+    }
 
 
 def test_b_enroll_retry_same_response(client):
