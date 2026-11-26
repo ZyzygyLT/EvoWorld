@@ -272,6 +272,11 @@ class ChallengeService:
                 client_idempotency_key,
                 request_hash,
             )
+        except Exception:
+            # El servicio es dueño del límite transaccional incluso cuando
+            # recibe una Session creada por el caller.
+            session.rollback()
+            raise
         finally:
             if own_session:
                 session.close()
@@ -319,11 +324,13 @@ class ChallengeService:
             op_row = repo.get_challenge_operation(
                 existing.id, organizer_user_id, client_idempotency_key
             )
-            return ChallengeResult(
+            result = ChallengeResult(
                 challenge=existing,
                 is_retry=True,
                 original_outcome=op_row.outcome if op_row is not None else None,
             )
+            session.commit()
+            return result
 
         # Validar parámetros antes de crear cualquier fila.
         if duration_ticks <= 0:
@@ -373,13 +380,15 @@ class ChallengeService:
             winner_op = repo.get_challenge_operation(
                 winner.id, organizer_user_id, client_idempotency_key
             )
-            return ChallengeResult(
+            result = ChallengeResult(
                 challenge=winner,
                 is_retry=True,
                 original_outcome=(
                     winner_op.outcome if winner_op is not None else None
                 ),
             )
+            session.commit()
+            return result
 
         # La operación original se conserva separada de la identidad de
         # creación. Las tres filas se confirman en el mismo COMMIT.
