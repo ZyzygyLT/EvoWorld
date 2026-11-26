@@ -142,7 +142,25 @@ class ChallengeParticipantRow(Base):
     __table_args__ = (
         UniqueConstraint("challenge_id", "user_id", name="uq_challenge_participant_user"),
         UniqueConstraint("world_id", name="uq_challenge_participant_world"),
-        CheckConstraint("result_verified IN (0, 1)", name="ck_challenge_participant_result_verified"),
+        CheckConstraint(
+            "state IN ('inscrito','preparando','ejecutando','finalizado','abandonado')",
+            name="ck_challenge_participant_state",
+        ),
+        CheckConstraint(
+            "result_status IS NULL OR result_status IN "
+            "('calculated','persisted','verified','confirmed','disputed','invalidated')",
+            name="ck_challenge_participant_result_status",
+        ),
+        CheckConstraint(
+            "result_verified IN (0, 1)",
+            name="ck_challenge_participant_result_verified",
+        ),
+        CheckConstraint(
+            "((result_status IN ('verified','confirmed') AND result_verified = 1) OR "
+            "((result_status IS NULL OR result_status IN "
+            "('calculated','persisted','disputed','invalidated')) AND result_verified = 0))",
+            name="ck_challenge_participant_result_verified_sync",
+        ),
         ForeignKeyConstraint(["challenge_id"], ["challenges.id"], ondelete="CASCADE"),
         ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         ForeignKeyConstraint(["world_id"], ["worlds.id"]),
@@ -156,7 +174,7 @@ class ChallengeParticipantRow(Base):
     state = Column(String(32), nullable=False, default="inscrito", server_default="inscrito")
     joined_at = Column(String, nullable=False)
     result_json = Column(Text, nullable=True)
-    result_status = Column(String(32), nullable=False, default="persisted", server_default="persisted")
+    result_status = Column(String(32), nullable=True)
     result_verified = Column(Integer, nullable=False, default=0, server_default="0")
 
 
