@@ -630,7 +630,10 @@ class ChallengeService:
         participant = ChallengeParticipantRow(
             challenge_id=challenge_id,
             user_id=user_id,
-            world_id=0,  # Sentinel: "sin mundo asignado"; se crea en preparing
+            # NULL representa "sin mundo asignado". Evita violar la FK a
+            # worlds.id y permite múltiples participantes antes de preparing.
+            # El valor 0 solo se tolera al leer registros legacy existentes.
+            world_id=None,
             public_alias=f"participant-{uuid.uuid4().hex}",
             state="inscrito",
             joined_at=self._now(),
