@@ -91,8 +91,8 @@ def _insert_challenge(conn, state="draft"):
 # ---------------------------------------------------------------------------
 
 
-def test_migration_backfills_random_alias(tmp_path):
-    # Create old schema without public_alias
+def test_migration_refuses_incompatible_f7d_schema_with_historical_rows(tmp_path):
+    # An incompatible legacy schema containing rows must be preserved.
     db_file = tmp_path / "old.db"
     eng = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
     with eng.connect() as conn:
@@ -141,19 +141,23 @@ def test_migration_backfills_random_alias(tmp_path):
         conn.commit()
     eng.dispose()
 
-    # Run ensure_schema (adds columns, backfills)
     eng2 = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
-    dbmod.ensure_schema(eng2)
+    with pytest.raises(RuntimeError, match="historical rows"):
+        dbmod.ensure_schema(eng2)
+
     with eng2.connect() as conn:
-        row = conn.execute(text("SELECT public_alias FROM challenge_participants WHERE id=1")).fetchone()
-        assert row is not None
-        alias = row[0]
-        assert alias is not None
-        assert alias != "participant_1"  # must not be deterministic id
-        assert len(alias) == 32
-        # result_status backfilled to verified
-        rs = conn.execute(text("SELECT result_status FROM challenge_participants WHERE id=1")).fetchone()[0]
-        assert rs == "verified"
+        challenge_count = conn.execute(text("SELECT COUNT(*) FROM challenges")).scalar_one()
+        participant_count = conn.execute(
+            text("SELECT COUNT(*) FROM challenge_participants")
+        ).scalar_one()
+        participant_columns = {
+            row[1] for row in conn.exec_driver_sql(
+                "PRAGMA table_info(challenge_participants)"
+            ).fetchall()
+        }
+        assert challenge_count == 1
+        assert participant_count == 1
+        assert "public_alias" not in participant_columns
     eng2.dispose()
 
 
