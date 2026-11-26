@@ -156,9 +156,7 @@ class ChallengeParticipantRow(Base):
             name="ck_challenge_participant_result_verified",
         ),
         CheckConstraint(
-            "((result_status IN ('verified','confirmed') AND result_verified = 1) OR "
-            "((result_status IS NULL OR result_status IN "
-            "('calculated','persisted','disputed','invalidated')) AND result_verified = 0))",
+            "result_verified = CASE WHEN result_status IN ('verified','confirmed') THEN 1 ELSE 0 END",
             name="ck_challenge_participant_result_verified_sync",
         ),
         ForeignKeyConstraint(["challenge_id"], ["challenges.id"], ondelete="CASCADE"),
