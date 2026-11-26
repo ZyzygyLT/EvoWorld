@@ -143,19 +143,15 @@ def _insert_participant(eng, challenge_id, user_id, world_id=0):
 
 
 def _ensure_enrollment_closed(eng, challenge_id, user_ids):
-    """Prepara el desafio y sus participantes para prepare_worlds."""
+    """Cierra la inscripci?n del desaf?o sin alterar estados de participantes."""
     with Session(eng, expire_on_commit=False) as s:
         s.execute(
-            text("UPDATE challenges SET state = 'enrollment_closed' "
-                 "WHERE id = :c"),
+            text(
+                "UPDATE challenges SET state = 'enrollment_closed' "
+                "WHERE id = :c"
+            ),
             {"c": challenge_id},
         )
-        for uid in user_ids:
-            s.execute(
-                text("UPDATE challenge_participants SET state = 'enrollment_closed' "
-                     "WHERE challenge_id = :c AND user_id = :u"),
-                {"c": challenge_id, "u": uid},
-            )
         s.commit()
 
 

@@ -55,7 +55,7 @@ def _participant(env, challenge_id, user_id, world_id, *,
                 int(status in ("verified", "confirmed"))
                 if result_verified is None else result_verified
             ),
-            state="activo",
+            state="inscrito",
             joined_at="2026-11-23 00:00:00",
         )
         session.add(row)
@@ -108,11 +108,12 @@ def test_participants_require_authentication_and_limit_rows(f7c_api):
     owner_headers, owner_id = _register(client, "partowner")
     participant_headers, participant_id = _register(client, "partuser")
     outsider_headers, _ = _register(client, "partoutsider")
+    _, other_id = _register(client, "partother")
 
     challenge_id = _challenge(env, owner_id, "running")
-    _participant(env, challenge_id, participant_id, 81001)
-    _participant(env, challenge_id, owner_id, 81002, alias="Owner")
-    _participant(env, challenge_id, 999999, 81003, alias="Other")
+    _participant(env, challenge_id, participant_id, None)
+    _participant(env, challenge_id, owner_id, None, alias="Owner")
+    _participant(env, challenge_id, other_id, None, alias="Other")
 
     url = f"/api/challenges/{challenge_id}/participants"
 
@@ -136,7 +137,6 @@ def test_participants_require_authentication_and_limit_rows(f7c_api):
 
     assert client.get(url, headers=outsider_headers).status_code == 404
 
-
 def test_admin_can_view_all_participants_based_on_database_role(f7c_api):
     client, env = f7c_api
     owner_headers, owner_id = _register(client, "adminpartowner")
@@ -149,8 +149,8 @@ def test_admin_can_view_all_participants_based_on_database_role(f7c_api):
         session.commit()
 
     challenge_id = _challenge(env, owner_id, "running")
-    _participant(env, challenge_id, admin_id, 82001)
-    _participant(env, challenge_id, other_id, 82002)
+    _participant(env, challenge_id, admin_id, None)
+    _participant(env, challenge_id, other_id, None)
 
     response = client.get(
         f"/api/challenges/{challenge_id}/participants",
@@ -163,22 +163,26 @@ def test_admin_can_view_all_participants_based_on_database_role(f7c_api):
 def test_public_results_are_anonymous_and_confirmed_only(f7c_api):
     client, env = f7c_api
     _, owner_id = _register(client, "resultowner")
+    _, user_a = _register(client, "resultusera")
+    _, user_b = _register(client, "resultuserb")
+    _, user_c = _register(client, "resultuserc")
+    _, user_d = _register(client, "resultuserd")
     challenge_id = _challenge(env, owner_id, "completed")
 
     _participant(
-        env, challenge_id, 101, 83001,
+        env, challenge_id, user_a, None,
         status="confirmed", alias="Public-A", population=300,
     )
     _participant(
-        env, challenge_id, 102, 83002,
+        env, challenge_id, user_b, None,
         status="persisted", alias="Private-B", population=500,
     )
     _participant(
-        env, challenge_id, 103, 83003,
+        env, challenge_id, user_c, None,
         status="confirmed", alias="Public-C", population=200,
     )
     _participant(
-        env, challenge_id, 104, 83004,
+        env, challenge_id, user_d, None,
         status="verified", alias="Verified-D", population=600,
     )
 
@@ -238,10 +242,10 @@ def test_participant_can_view_own_pending_row_before_completion(f7c_api):
 
     challenge_id = _challenge(env, owner_id, "running")
     _participant(
-        env, challenge_id, participant_id, 84001,
+        env, challenge_id, participant_id, None,
         status="persisted", population=None, result_verified=0,
     )
-    _participant(env, challenge_id, other_id, 84002, status="persisted")
+    _participant(env, challenge_id, other_id, None, status="persisted")
 
     response = client.get(
         f"/api/challenges/{challenge_id}/results",
@@ -271,11 +275,11 @@ def test_participant_can_view_own_verified_result_before_public_confirmation(f7c
 
     challenge_id = _challenge(env, owner_id, "completed")
     _participant(
-        env, challenge_id, participant_id, 84101,
+        env, challenge_id, participant_id, None,
         status="verified", alias="Private-Verified", population=450,
     )
     _participant(
-        env, challenge_id, other_id, 84102,
+        env, challenge_id, other_id, None,
         status="verified", alias="Other-Verified", population=700,
     )
 
@@ -315,8 +319,8 @@ def test_admin_and_organizer_can_view_all_results(f7c_api):
         session.commit()
 
     challenge_id = _challenge(env, owner_id, "running")
-    _participant(env, challenge_id, participant_id, 85001, status="confirmed")
-    _participant(env, challenge_id, admin_id, 85002, status="persisted")
+    _participant(env, challenge_id, participant_id, None, status="confirmed")
+    _participant(env, challenge_id, admin_id, None, status="persisted")
 
     for headers in (owner_headers, admin_headers):
         response = client.get(
