@@ -596,6 +596,22 @@ def test_e_enroll_different_actors_same_key(client):
     assert len(ops) == 2
     assert {o["actor_user_id"] for o in ops} == {uid1, uid2}
 
+    # Ambos participantes quedan inscritos sin mundo hasta la fase preparing.
+    # NULL respeta la FK a worlds.id y no colisiona con UNIQUE(world_id).
+    with dbmod.SessionLocal() as s:
+        participants = s.execute(
+            text(
+                "SELECT user_id, world_id, public_alias "
+                "FROM challenge_participants WHERE challenge_id = :cid"
+            ),
+            {"cid": cid},
+        ).all()
+    assert len(participants) == 2
+    assert {p.user_id for p in participants} == {uid1, uid2}
+    assert all(p.world_id is None for p in participants)
+    assert all(p.public_alias for p in participants)
+    assert len({p.public_alias for p in participants}) == 2
+
 
 # ===========================================================================
 # Scenario F: simulate lost response after commit → recover original response
