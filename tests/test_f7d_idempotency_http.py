@@ -266,8 +266,8 @@ def test_c_create_same_key_different_payload_conflict_409(client):
 
 
 def test_e_create_same_key_different_actors_are_independent(client):
-    h1, uid1 = _register(client, "create_actor_one")
-    h2, uid2 = _register(client, "create_actor_two")
+    h1, uid1 = _register(client, "creatorone")
+    h2, uid2 = _register(client, "creatortwo")
     key = "shared-create-key"
     body = _challenge_body("Same semantic payload")
 
