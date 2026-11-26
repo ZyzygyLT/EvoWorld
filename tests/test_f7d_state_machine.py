@@ -237,7 +237,7 @@ def test_public_endpoint_excludes_non_confirmed(tmp_path):
                 "INSERT INTO challenge_participants (challenge_id, user_id, state, joined_at, result_json, result_verified, result_status, public_alias) VALUES "
                 "(1, 1, 'finalizado', 't', :m1, 1, 'confirmed', 'a1'), "
                 "(1, 2, 'finalizado', 't', :m2, 1, 'verified', 'a2'), "
-                "(1, 3, 'finalizado', 't', :m3, 1, 'disputed', 'a3')"
+                "(1, 3, 'finalizado', 't', :m3, 0, 'disputed', 'a3')"
             ),
             {"m1": json.dumps({"total_population": 10}), "m2": json.dumps({"total_population": 20}), "m3": json.dumps({"total_population": 30})},
         )
