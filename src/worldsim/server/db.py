@@ -419,6 +419,159 @@ def _replace_empty_legacy_f7c_tables(conn) -> None:
             conn.execute(text(f'DROP TABLE "{table}"'))
 
 
+
+_F7D_TABLES = (
+    "challenges",
+    "challenge_participants",
+    "challenge_operations",
+    "challenge_creation_requests",
+)
+_F7D_REQUIRED_COLUMNS = {
+    "challenges": {
+        "id", "organizer_user_id", "name", "config_json", "rules_version",
+        "duration_ticks", "state", "created_at", "closed_at", "completed_at",
+    },
+    "challenge_participants": {
+        "id", "challenge_id", "user_id", "world_id", "public_alias", "state",
+        "joined_at", "result_json", "result_status", "result_verified",
+    },
+    "challenge_operations": {
+        "id", "challenge_id", "operation", "actor_user_id",
+        "client_idempotency_key", "request_hash", "outcome", "created_at",
+    },
+    "challenge_creation_requests": {
+        "id", "actor_user_id", "client_idempotency_key", "request_hash",
+        "challenge_id", "created_at",
+    },
+}
+_F7D_REQUIRED_CHECKS = {
+    "challenges": {"ck_challenge_state"},
+    "challenge_participants": {
+        "ck_challenge_participant_state",
+        "ck_challenge_participant_result_status",
+        "ck_challenge_participant_result_verified",
+        "ck_challenge_participant_result_verified_sync",
+    },
+    "challenge_operations": set(),
+    "challenge_creation_requests": set(),
+}
+_F7D_REQUIRED_UNIQUES = {
+    "challenges": set(),
+    "challenge_participants": {
+        frozenset(("challenge_id", "user_id")),
+        frozenset(("world_id",)),
+    },
+    "challenge_operations": {
+        frozenset(("challenge_id", "actor_user_id", "client_idempotency_key")),
+    },
+    "challenge_creation_requests": {
+        frozenset(("actor_user_id", "client_idempotency_key")),
+        frozenset(("challenge_id",)),
+    },
+}
+_F7D_REQUIRED_FKS = {
+    "challenges": {("organizer_user_id", "users", "RESTRICT")},
+    "challenge_participants": {
+        ("challenge_id", "challenges", "CASCADE"),
+        ("user_id", "users", "CASCADE"),
+        ("world_id", "worlds", "NO ACTION"),
+    },
+    "challenge_operations": {
+        ("challenge_id", "challenges", "CASCADE"),
+        ("actor_user_id", "users", "NO ACTION"),
+    },
+    "challenge_creation_requests": {
+        ("actor_user_id", "users", "NO ACTION"),
+        ("challenge_id", "challenges", "NO ACTION"),
+    },
+}
+
+
+def _f7d_schema_is_current(conn, table: str) -> bool:
+    inspector = inspect(conn)
+    columns = inspector.get_columns(table)
+    if {column["name"] for column in columns} != _F7D_REQUIRED_COLUMNS[table]:
+        return False
+
+    by_name = {column["name"]: column for column in columns}
+    required_not_null = {
+        "challenges": {
+            "organizer_user_id", "name", "config_json", "rules_version",
+            "duration_ticks", "state", "created_at",
+        },
+        "challenge_participants": {
+            "challenge_id", "user_id", "public_alias", "state", "joined_at",
+            "result_verified",
+        },
+        "challenge_operations": {
+            "challenge_id", "operation", "actor_user_id",
+            "client_idempotency_key", "request_hash", "created_at",
+        },
+        "challenge_creation_requests": {
+            "actor_user_id", "client_idempotency_key", "request_hash",
+            "challenge_id", "created_at",
+        },
+    }[table]
+    if any(by_name[name]["nullable"] for name in required_not_null):
+        return False
+
+    check_names = {
+        item.get("name") for item in inspector.get_check_constraints(table)
+    }
+    if not _F7D_REQUIRED_CHECKS[table].issubset(check_names):
+        return False
+
+    unique_columns = {
+        frozenset(item["column_names"])
+        for item in inspector.get_unique_constraints(table)
+        if item.get("column_names")
+    }
+    if not _F7D_REQUIRED_UNIQUES[table].issubset(unique_columns):
+        return False
+
+    foreign_keys = set()
+    for item in inspector.get_foreign_keys(table):
+        constrained = item.get("constrained_columns") or []
+        referred = item.get("referred_table")
+        options = item.get("options") or {}
+        ondelete = (options.get("ondelete") or "NO ACTION").upper()
+        if len(constrained) == 1 and referred:
+            foreign_keys.add((constrained[0], referred, ondelete))
+    return _F7D_REQUIRED_FKS[table].issubset(foreign_keys)
+
+
+def _replace_empty_legacy_f7d_tables(conn) -> None:
+    """Rebuild only an empty/incompatible F7-D table family; never discard rows."""
+    inspector = inspect(conn)
+    existing = set(inspector.get_table_names())
+    incompatible = any(
+        table in existing and not _f7d_schema_is_current(conn, table)
+        for table in _F7D_TABLES
+    )
+    if not incompatible:
+        return
+
+    counts = {
+        table: int(conn.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar_one())
+        if table in existing else 0
+        for table in _F7D_TABLES
+    }
+    if any(counts.values()):
+        raise RuntimeError(
+            "Cannot migrate incompatible F7-D schema: historical rows exist; "
+            f"refusing destructive replacement (counts={counts})"
+        )
+
+    # Children first; all four tables were proven empty before any DDL.
+    for table in (
+        "challenge_operations",
+        "challenge_participants",
+        "challenge_creation_requests",
+        "challenges",
+    ):
+        if table in existing:
+            conn.execute(text(f'DROP TABLE "{table}"'))
+
 def ensure_schema(target_engine=None) -> None:
     """Create and explicitly migrate schema (DEC02; no import-time side effects).
 
@@ -442,6 +595,7 @@ def ensure_schema(target_engine=None) -> None:
             conn.execute(text("SELECT pg_advisory_xact_lock(734821037)"))
 
         _replace_empty_legacy_f7c_tables(conn)
+        _replace_empty_legacy_f7d_tables(conn)
         Base.metadata.create_all(conn)
 
         user_columns = {
