@@ -29,8 +29,6 @@ def _challenge(env, organizer_id, state="published"):
             duration_ticks=50,
             state=state,
             created_at="2026-11-23 00:00:00",
-            client_idempotency_key=f"privacy-{organizer_id}-{state}",
-            request_hash="privacy-test",
         )
         session.add(row)
         session.commit()
