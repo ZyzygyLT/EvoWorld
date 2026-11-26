@@ -1139,19 +1139,6 @@ class ChallengeRepository:
             )
         ).first()
 
-    def get_challenge_by_organizer_and_name(
-        self, organizer_user_id: int, name: str
-    ) -> ChallengeRow | None:
-        """Busca un desafío existente del mismo organizador con el mismo nombre
-        (idempotencia aproximada para creación)."""
-        s = self._session
-        return s.scalars(
-            select(ChallengeRow).where(
-                ChallengeRow.organizer_user_id == organizer_user_id,
-                ChallengeRow.name == name,
-            )
-        ).first()
-
     def get_challenges_by_state(self, state: str) -> list[ChallengeRow]:
         s = self._session
         return list(
